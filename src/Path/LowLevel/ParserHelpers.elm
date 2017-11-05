@@ -48,11 +48,11 @@ delimitedEndForbidden parseItem delimiter revItems =
         chompRest item =
             delimitedEndForbidden parseItem delimiter (item :: revItems)
     in
-    oneOf
-        [ delayedCommit delimiter <|
-            andThen chompRest parseItem
-        , succeed (List.reverse revItems)
-        ]
+        oneOf
+            [ delayedCommit delimiter <|
+                andThen chompRest parseItem
+            , succeed (List.reverse revItems)
+            ]
 
 
 type Sign
@@ -97,12 +97,12 @@ fractionalConstant =
             String.toFloat (toString left ++ "." ++ toString right)
                 |> resultToParser
     in
-    join <|
-        oneOf
-            -- only commit to a fractional when the '.' is parsed
-            [ delayedCommitMap helper (withDefault 0 digitSequence |. symbol ".") digitSequence
-            , delayedCommitMap helper (withDefault 0 digitSequence |. symbol ".") <| succeed 0
-            ]
+        join <|
+            oneOf
+                -- only commit to a fractional when the '.' is parsed
+                [ delayedCommitMap helper (withDefault 0 digitSequence |. symbol ".") digitSequence
+                , delayedCommitMap helper (withDefault 0 digitSequence |. symbol ".") <| succeed 0
+                ]
 
 
 applyExponent : Float -> Exponent -> Parser Float
@@ -221,7 +221,7 @@ coordinatePair =
     inContext "coordinate pair" <|
         succeed (,)
             |= number
-            |. commaWsp
+            |. optional commaWsp
             |= number
 
 
