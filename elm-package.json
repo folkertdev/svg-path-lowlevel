@@ -1,6 +1,6 @@
 {
     "version": "1.0.1",
-    "summary": "Example Project",
+    "summary": "parsing, modifying, and pretty-printing of svg path instructions",
     "repository": "https://github.com/folkertdev/svg-path-lowlevel.git",
     "license": "BSD-3-Clause",
     "source-directories": [
