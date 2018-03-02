@@ -12,6 +12,7 @@ module Path.LowLevel
         , element
         , encodeFlags
         , toString
+        , toStringWithPrecision
         )
 
 {-| A low-level package for working with svg path strings
@@ -24,7 +25,7 @@ This package has two use cases
 It is meant as a foundation: there is little type safety and convenience.
 It's just a literal translation of the SVG spec into elm data types.
 
-@docs toString, element
+@docs toString, toStringWithPrecision, element
 @docs SubPath, Mode, MoveTo, DrawTo, Coordinate
 
 @docs ArcFlag, Direction
@@ -218,29 +219,48 @@ toString subpaths =
         |> String.join " "
 
 
+{-| Convert a path to a string with floats that have a fixed number of decimals
+-}
+toStringWithPrecision : Int -> List SubPath -> String
+toStringWithPrecision n subpaths =
+    subpaths
+        |> List.map (toStringSubPathWithPrecision n)
+        |> String.join " "
+
+
+genericToStringSubPath : FloatFormatter -> SubPath -> String
+genericToStringSubPath formatter { moveto, drawtos } =
+    stringifyMoveTo formatter moveto ++ " " ++ String.join " " (List.map (stringifyDrawTo formatter) drawtos)
+
+
 toStringSubPath : SubPath -> String
-toStringSubPath { moveto, drawtos } =
-    stringifyMoveTo moveto ++ " " ++ String.join " " (List.map stringifyDrawTo drawtos)
+toStringSubPath subpath =
+    genericToStringSubPath floatFullPrecision subpath
 
 
-stringifyMoveTo : MoveTo -> String
-stringifyMoveTo (MoveTo mode coordinate) =
+toStringSubPathWithPrecision : Int -> SubPath -> String
+toStringSubPathWithPrecision n subpath =
+    genericToStringSubPath (floatWithDecimals n) subpath
+
+
+stringifyMoveTo : FloatFormatter -> MoveTo -> String
+stringifyMoveTo f (MoveTo mode coordinate) =
     case mode of
         Absolute ->
-            "M" ++ stringifyCoordinate coordinate
+            "M" ++ stringifyCoordinate f coordinate
 
         Relative ->
-            "m" ++ stringifyCoordinate coordinate
+            "m" ++ stringifyCoordinate f coordinate
 
 
-stringifyDrawTo : DrawTo -> String
-stringifyDrawTo command =
+stringifyDrawTo : FloatFormatter -> DrawTo -> String
+stringifyDrawTo f command =
     if isEmpty command then
         ""
     else
         case command of
             LineTo mode coordinates ->
-                stringifyCharacter mode 'L' ++ String.join " " (List.map stringifyCoordinate coordinates)
+                stringifyCharacter mode 'L' ++ String.join " " (List.map (stringifyCoordinate f) coordinates)
 
             Horizontal mode coordinates ->
                 if List.isEmpty coordinates then
@@ -252,19 +272,19 @@ stringifyDrawTo command =
                 stringifyCharacter mode 'V' ++ String.join " " (List.map Basics.toString coordinates)
 
             CurveTo mode coordinates ->
-                stringifyCharacter mode 'C' ++ String.join " " (List.map stringifyCoordinate3 coordinates)
+                stringifyCharacter mode 'C' ++ String.join " " (List.map (stringifyCoordinate3 f) coordinates)
 
             SmoothCurveTo mode coordinates ->
-                stringifyCharacter mode 'S' ++ String.join " " (List.map stringifyCoordinate2 coordinates)
+                stringifyCharacter mode 'S' ++ String.join " " (List.map (stringifyCoordinate2 f) coordinates)
 
             QuadraticBezierCurveTo mode coordinates ->
-                stringifyCharacter mode 'Q' ++ String.join " " (List.map stringifyCoordinate2 coordinates)
+                stringifyCharacter mode 'Q' ++ String.join " " (List.map (stringifyCoordinate2 f) coordinates)
 
             SmoothQuadraticBezierCurveTo mode coordinates ->
-                stringifyCharacter mode 'T' ++ String.join " " (List.map stringifyCoordinate coordinates)
+                stringifyCharacter mode 'T' ++ String.join " " (List.map (stringifyCoordinate f) coordinates)
 
             EllipticalArc mode arguments ->
-                stringifyCharacter mode 'A' ++ String.join " " (List.map stringifyEllipticalArcArgument arguments)
+                stringifyCharacter mode 'A' ++ String.join " " (List.map (stringifyEllipticalArcArgument f) arguments)
 
             ClosePath ->
                 "Z"
@@ -307,18 +327,18 @@ isEmpty command =
             False
 
 
-stringifyEllipticalArcArgument : EllipticalArcArgument -> String
-stringifyEllipticalArcArgument { radii, xAxisRotate, arcFlag, direction, target } =
+stringifyEllipticalArcArgument : FloatFormatter -> EllipticalArcArgument -> String
+stringifyEllipticalArcArgument formatter { radii, xAxisRotate, arcFlag, direction, target } =
     let
         ( arc, sweep ) =
             encodeFlags ( arcFlag, direction )
     in
     String.join " "
-        [ stringifyCoordinate radii
+        [ stringifyCoordinate formatter radii
         , Basics.toString xAxisRotate
         , Basics.toString arc
         , Basics.toString sweep
-        , stringifyCoordinate target
+        , stringifyCoordinate formatter target
         ]
 
 
@@ -332,16 +352,61 @@ stringifyCharacter mode character =
             String.fromChar (Char.toLower character)
 
 
-stringifyCoordinate : Coordinate -> String
-stringifyCoordinate ( x, y ) =
-    Basics.toString x ++ "," ++ Basics.toString y
+stringifyCoordinate : FloatFormatter -> Coordinate -> String
+stringifyCoordinate formatter ( x, y ) =
+    formatter x ++ "," ++ formatter y
 
 
-stringifyCoordinate2 : ( Coordinate, Coordinate ) -> String
-stringifyCoordinate2 ( c1, c2 ) =
-    stringifyCoordinate c1 ++ " " ++ stringifyCoordinate c2
+stringifyCoordinate2 : FloatFormatter -> ( Coordinate, Coordinate ) -> String
+stringifyCoordinate2 formatter ( c1, c2 ) =
+    stringifyCoordinate formatter c1 ++ " " ++ stringifyCoordinate formatter c2
 
 
-stringifyCoordinate3 : ( Coordinate, Coordinate, Coordinate ) -> String
-stringifyCoordinate3 ( c1, c2, c3 ) =
-    stringifyCoordinate c1 ++ " " ++ stringifyCoordinate c2 ++ " " ++ stringifyCoordinate c3
+stringifyCoordinate3 : FloatFormatter -> ( Coordinate, Coordinate, Coordinate ) -> String
+stringifyCoordinate3 formatter ( c1, c2, c3 ) =
+    stringifyCoordinate formatter c1 ++ " " ++ stringifyCoordinate formatter c2 ++ " " ++ stringifyCoordinate formatter c3
+
+
+type alias FloatFormatter =
+    Float -> String
+
+
+floatWithDecimals : Int -> Float -> String
+floatWithDecimals n num =
+    roundTo n num
+
+
+{-| Rounds a float to given number of decimal points.
+
+taken from [elm-formatting]
+
+[elm-formatting]: https://github.com/amitu/elm-formatting/blob/1.0.0/src/Formatting.elm
+
+-}
+roundTo : Int -> Float -> String
+roundTo n value =
+    if n == 0 then
+        Basics.toString (round value)
+    else
+        let
+            exp =
+                10 ^ n
+
+            raised =
+                abs (round (value * toFloat exp))
+
+            sign =
+                if value < 0.0 then
+                    "-"
+                else
+                    ""
+        in
+        sign
+            ++ Basics.toString (raised // exp)
+            ++ "."
+            ++ String.padLeft n '0' (Basics.toString (rem raised exp))
+
+
+floatFullPrecision : Float -> String
+floatFullPrecision =
+    Basics.toString
