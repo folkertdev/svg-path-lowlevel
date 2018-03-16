@@ -7,11 +7,13 @@ module Path.LowLevel
         , EllipticalArcArgument
         , Mode(..)
         , MoveTo(..)
-        , Precision(..)
         , SubPath
+        , Option
         , decodeFlags
         , encodeFlags
         , toString
+        , toStringWith
+        , decimalPlaces
         )
 
 {-| A low-level package for working with svg path strings
@@ -24,7 +26,7 @@ This package has two use cases
 It is meant as a foundation: there is little type safety and convenience.
 It's just a literal translation of the SVG spec into elm data types.
 
-@docs toString, Precision
+@docs toString,toStringWith, Option, decimalPlaces
 @docs SubPath, Mode, MoveTo, DrawTo, Coordinate
 
 @docs ArcFlag, Direction
@@ -179,77 +181,122 @@ decodeFlags ( arcFlag, sweepFlag ) =
 -- toString conversion
 
 
-{-| Customize number of decimals in the output string
-
-The string representation of a float can be quite long, and for most purposes a couple of decimals gives
-enough precision. Limit the number of decimals with `AtMost`, or get the full string with `FullPrecision`.
-
--}
-type Precision
-    = FullPrecision
-    | AtMost Int
-
-
 {-| Convert a list of subpaths to svg path syntax
 
-    let
-        myPath =
-            [ { moveto = MoveTo Relative ( 10, 20 )
-              , drawtos =
-                    [ EllipticalArc Absolute
-                        { radii = ( 25, 25 )
-                        , xAxisRotate = -30
-                        , arcFlag = SmallestArc
-                        , direction = CounterClockwise
-                        , target = ( 50, -25 )
-                        }
+    myPath : List SubPath
+    myPath =
+        [ { moveto = MoveTo Relative ( 10, 20 )
+          , drawtos =
+                [ EllipticalArc Absolute
+                    [ { radii = ( 25, 25 )
+                    , xAxisRotate = -30
+                    , arcFlag = SmallestArc
+                    , direction = CounterClockwise
+                    , target = ( 50, -25 )
+                    }
                     ]
-              }
-            ]
-    in
-        toString myPath --> "m10,20 A25,25 -30 0,1 50,-25"
+                ]
+          }
+        ]
+
+    Path.LowLevel.toString myPath
+        --> "m10,20 A25,25 -30 0 1 50,-25"
 
 -}
-toString : Precision -> List SubPath -> String
-toString precision subpaths =
-    subpaths
-        |> List.map (toStringSubPath precision)
-        |> String.join " "
+toString : List SubPath -> String
+toString =
+    toStringWith []
 
 
-precisionFormatter : Precision -> (Float -> String)
-precisionFormatter p =
-    case p of
-        FullPrecision ->
-            floatFullPrecision
-
-        AtMost n ->
-            floatWithDecimals n
+{-| Formatting options
+-}
+type Option
+    = DecimalPlaces Int
 
 
-toStringSubPath : Precision -> SubPath -> String
-toStringSubPath precision { moveto, drawtos } =
-    stringifyMoveTo precision moveto ++ " " ++ String.join " " (List.map (stringifyDrawTo precision) drawtos)
+{-| Set the maximum number of decimal places in the output string
+
+    myPath : List SubPath
+    myPath =
+        [ { moveto = MoveTo Relative ( 10, 20 )
+          , drawtos =
+              [ LineTo Absolute
+                [ ( 1 / 3, 1 / 3 )
+                , ( 1 / 7, 1 / 7 )
+                ]
+              ]
+          }
+        ]
+
+    toStringWith [] myPath
+        --> "m10,20 L0.3333333333333333,0.3333333333333333 0.14285714285714285,0.14285714285714285"
+
+    toStringWith [ decimalPlaces 3 ] myPath
+        --> "m10,20 L0.333,0.333 0.143,0.143"
+
+-}
+decimalPlaces : Int -> Option
+decimalPlaces =
+    DecimalPlaces
 
 
-stringifyMoveTo : Precision -> MoveTo -> String
-stringifyMoveTo precision (MoveTo mode coordinate) =
+type alias Config =
+    { floatFormatter : Float -> String }
+
+
+defaultConfig : Config
+defaultConfig =
+    { floatFormatter = Basics.toString }
+
+
+optionFolder : Option -> Config -> Config
+optionFolder option config =
+    case option of
+        DecimalPlaces n ->
+            { config | floatFormatter = roundTo n }
+
+
+accumulateOptions : List Option -> Config
+accumulateOptions =
+    List.foldl optionFolder defaultConfig
+
+
+{-| Convert a list of subpaths to a string, with some extra formatting options
+-}
+toStringWith : List Option -> List SubPath -> String
+toStringWith options subpaths =
+    let
+        config =
+            accumulateOptions options
+    in
+        subpaths
+            |> List.map (toStringSubPath config)
+            |> String.join " "
+
+
+toStringSubPath : Config -> SubPath -> String
+toStringSubPath config { moveto, drawtos } =
+    stringifyMoveTo config moveto ++ " " ++ String.join " " (List.map (stringifyDrawTo config) drawtos)
+
+
+stringifyMoveTo : Config -> MoveTo -> String
+stringifyMoveTo config (MoveTo mode coordinate) =
     case mode of
         Absolute ->
-            "M" ++ stringifyCoordinate precision coordinate
+            "M" ++ stringifyCoordinate config coordinate
 
         Relative ->
-            "m" ++ stringifyCoordinate precision coordinate
+            "m" ++ stringifyCoordinate config coordinate
 
 
-stringifyDrawTo : Precision -> DrawTo -> String
-stringifyDrawTo precision command =
+stringifyDrawTo : Config -> DrawTo -> String
+stringifyDrawTo config command =
     if isEmpty command then
         ""
     else
         case command of
             LineTo mode coordinates ->
-                stringifyCharacter mode 'L' ++ String.join " " (List.map (stringifyCoordinate precision) coordinates)
+                stringifyCharacter mode 'L' ++ String.join " " (List.map (stringifyCoordinate config) coordinates)
 
             Horizontal mode coordinates ->
                 if List.isEmpty coordinates then
@@ -261,19 +308,19 @@ stringifyDrawTo precision command =
                 stringifyCharacter mode 'V' ++ String.join " " (List.map Basics.toString coordinates)
 
             CurveTo mode coordinates ->
-                stringifyCharacter mode 'C' ++ String.join " " (List.map (stringifyCoordinate3 precision) coordinates)
+                stringifyCharacter mode 'C' ++ String.join " " (List.map (stringifyCoordinate3 config) coordinates)
 
             SmoothCurveTo mode coordinates ->
-                stringifyCharacter mode 'S' ++ String.join " " (List.map (stringifyCoordinate2 precision) coordinates)
+                stringifyCharacter mode 'S' ++ String.join " " (List.map (stringifyCoordinate2 config) coordinates)
 
             QuadraticBezierCurveTo mode coordinates ->
-                stringifyCharacter mode 'Q' ++ String.join " " (List.map (stringifyCoordinate2 precision) coordinates)
+                stringifyCharacter mode 'Q' ++ String.join " " (List.map (stringifyCoordinate2 config) coordinates)
 
             SmoothQuadraticBezierCurveTo mode coordinates ->
-                stringifyCharacter mode 'T' ++ String.join " " (List.map (stringifyCoordinate precision) coordinates)
+                stringifyCharacter mode 'T' ++ String.join " " (List.map (stringifyCoordinate config) coordinates)
 
             EllipticalArc mode arguments ->
-                stringifyCharacter mode 'A' ++ String.join " " (List.map (stringifyEllipticalArcArgument precision) arguments)
+                stringifyCharacter mode 'A' ++ String.join " " (List.map (stringifyEllipticalArcArgument config) arguments)
 
             ClosePath ->
                 "Z"
@@ -316,19 +363,19 @@ isEmpty command =
             False
 
 
-stringifyEllipticalArcArgument : Precision -> EllipticalArcArgument -> String
-stringifyEllipticalArcArgument precision { radii, xAxisRotate, arcFlag, direction, target } =
+stringifyEllipticalArcArgument : Config -> EllipticalArcArgument -> String
+stringifyEllipticalArcArgument config { radii, xAxisRotate, arcFlag, direction, target } =
     let
         ( arc, sweep ) =
             encodeFlags ( arcFlag, direction )
     in
-    String.join " "
-        [ stringifyCoordinate precision radii
-        , Basics.toString xAxisRotate
-        , Basics.toString arc
-        , Basics.toString sweep
-        , stringifyCoordinate precision target
-        ]
+        String.join " "
+            [ stringifyCoordinate config radii
+            , Basics.toString xAxisRotate
+            , Basics.toString arc
+            , Basics.toString sweep
+            , stringifyCoordinate config target
+            ]
 
 
 stringifyCharacter : Mode -> Char -> String
@@ -341,27 +388,24 @@ stringifyCharacter mode character =
             String.fromChar (Char.toLower character)
 
 
-stringifyCoordinate : Precision -> Coordinate -> String
-stringifyCoordinate precision ( x, y ) =
-    let
-        formatter =
-            precisionFormatter precision
-    in
-    formatter x ++ "," ++ formatter y
+stringifyCoordinate : Config -> Coordinate -> String
+stringifyCoordinate config ( x, y ) =
+    config.floatFormatter x ++ "," ++ config.floatFormatter y
 
 
-stringifyCoordinate2 : Precision -> ( Coordinate, Coordinate ) -> String
-stringifyCoordinate2 precision ( c1, c2 ) =
-    stringifyCoordinate precision c1 ++ " " ++ stringifyCoordinate precision c2
+stringifyCoordinate2 : Config -> ( Coordinate, Coordinate ) -> String
+stringifyCoordinate2 config ( c1, c2 ) =
+    stringifyCoordinate config c1 ++ " " ++ stringifyCoordinate config c2
 
 
-stringifyCoordinate3 : Precision -> ( Coordinate, Coordinate, Coordinate ) -> String
-stringifyCoordinate3 precision ( c1, c2, c3 ) =
-    stringifyCoordinate precision c1 ++ " " ++ stringifyCoordinate precision c2 ++ " " ++ stringifyCoordinate precision c3
+stringifyCoordinate3 : Config -> ( Coordinate, Coordinate, Coordinate ) -> String
+stringifyCoordinate3 config ( c1, c2, c3 ) =
+    stringifyCoordinate config c1 ++ " " ++ stringifyCoordinate config c2 ++ " " ++ stringifyCoordinate config c3
 
 
-type alias FloatFormatter =
-    Float -> String
+floatFullConfig : Float -> String
+floatFullConfig =
+    Basics.toString
 
 
 floatWithDecimals : Int -> Float -> String
@@ -397,15 +441,10 @@ roundTo n value =
             decimals =
                 rem raised exp
         in
-        if decimals == 0 then
-            sign ++ Basics.toString (raised // exp)
-        else
-            sign
-                ++ Basics.toString (raised // exp)
-                ++ "."
-                ++ Basics.toString decimals
-
-
-floatFullPrecision : Float -> String
-floatFullPrecision =
-    Basics.toString
+            if decimals == 0 then
+                sign ++ Basics.toString (raised // exp)
+            else
+                sign
+                    ++ Basics.toString (raised // exp)
+                    ++ "."
+                    ++ Basics.toString decimals
