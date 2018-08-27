@@ -1,0 +1,20 @@
+{
+    "type": "package",
+    "name": "folkertdev/svg-path-lowlevel",
+    "summary": "Parser and pretty printer for SVG paths",
+    "license": "MPL-2.0",
+    "version": "1.0.0",
+    "exposed-modules": [
+        "Path.LowLevel",
+        "Path.LowLevel.Parser"
+    ],
+    "elm-version": "0.19.0 <= v < 0.20.0",
+    "dependencies": {
+        "elm/core": "1.0.0 <= v < 2.0.0",
+        "elm/parser": "1.0.0 <= v < 2.0.0"
+    },
+    "test-dependencies": {
+        "elm/random": "1.0.0 <= v < 2.0.0",
+        "elm-explorations/test": "1.0.0 <= v < 2.0.0"
+    }
+}

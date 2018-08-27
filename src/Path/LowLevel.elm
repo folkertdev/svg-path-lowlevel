@@ -246,7 +246,7 @@ type alias Config =
 
 defaultConfig : Config
 defaultConfig =
-    { floatFormatter = Basics.toString }
+    { floatFormatter = String.fromFloat }
 
 
 optionFolder : Option -> Config -> Config
@@ -302,10 +302,10 @@ stringifyDrawTo config command =
                 if List.isEmpty coordinates then
                     ""
                 else
-                    stringifyCharacter mode 'H' ++ String.join " " (List.map Basics.toString coordinates)
+                    stringifyCharacter mode 'H' ++ String.join " " (List.map String.fromFloat coordinates)
 
             Vertical mode coordinates ->
-                stringifyCharacter mode 'V' ++ String.join " " (List.map Basics.toString coordinates)
+                stringifyCharacter mode 'V' ++ String.join " " (List.map String.fromFloat coordinates)
 
             CurveTo mode coordinates ->
                 stringifyCharacter mode 'C' ++ String.join " " (List.map (stringifyCoordinate3 config) coordinates)
@@ -371,9 +371,9 @@ stringifyEllipticalArcArgument config { radii, xAxisRotate, arcFlag, direction, 
     in
         String.join " "
             [ stringifyCoordinate config radii
-            , Basics.toString xAxisRotate
-            , Basics.toString arc
-            , Basics.toString sweep
+            , String.fromFloat xAxisRotate
+            , String.fromInt arc
+            , String.fromInt sweep
             , stringifyCoordinate config target
             ]
 
@@ -405,7 +405,7 @@ stringifyCoordinate3 config ( c1, c2, c3 ) =
 
 floatFullConfig : Float -> String
 floatFullConfig =
-    Basics.toString
+    String.fromFloat
 
 
 floatWithDecimals : Int -> Float -> String
@@ -423,7 +423,7 @@ taken from [elm-formatting]
 roundTo : Int -> Float -> String
 roundTo n value =
     if n == 0 then
-        Basics.toString (round value)
+        String.fromInt (round value)
     else
         let
             exp =
@@ -439,12 +439,12 @@ roundTo n value =
                     ""
 
             decimals =
-                rem raised exp
+                Basics.remainderBy exp raised
         in
             if decimals == 0 then
-                sign ++ Basics.toString (raised // exp)
+                sign ++ String.fromInt (raised // exp)
             else
                 sign
-                    ++ Basics.toString (raised // exp)
+                    ++ String.fromInt (raised // exp)
                     ++ "."
-                    ++ Basics.toString decimals
+                    ++ String.fromInt decimals

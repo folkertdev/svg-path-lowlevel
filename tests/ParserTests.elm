@@ -1,8 +1,9 @@
-module ParserTests exposing (..)
+module ParserTests exposing (commaWhitespaceParsing, commands, coordinatePairParsingProblems, fuzzCoordinate, fuzzMode, fuzzMoveTo, parseTest, primitives, suite, whitespaceParsing)
 
 import Expect exposing (Expectation)
 import Fuzz exposing (Fuzzer, bool, int)
 import Parser exposing ((|.), (|=))
+import Parser.Future as Parser
 import Path.LowLevel exposing (..)
 import Path.LowLevel.ParserHelpers exposing (..)
 import Path.LowLevel.ParserInternal exposing (..)
@@ -27,59 +28,58 @@ suite =
           z
           """
         in
-            [ test "moveto drawto command group" <|
-                \_ ->
-                    Parser.run moveToDrawToCommandGroup serious
-                        |> Expect.equal
-                            (Ok
-                                ( MoveTo Absolute ( 600, 350 )
-                                , [ LineTo Relative [ ( 10, 10 ) ], LineTo Relative [ ( 20, 20 ) ], ClosePath ]
-                                )
+        [ test "moveto drawto command group" <|
+            \_ ->
+                Parser.run moveToDrawToCommandGroup serious
+                    |> Expect.equal
+                        (Ok
+                            ( MoveTo Absolute ( 600, 350 )
+                            , [ LineTo Relative [ ( 10, 10 ) ], LineTo Relative [ ( 20, 20 ) ], ClosePath ]
                             )
-            , test "moveto drawto command groups lines" <|
-                \_ ->
-                    Parser.run moveToDrawToCommandGroups serious
-                        |> Expect.equal
-                            (Ok
-                                [ ( MoveTo Absolute ( 600, 350 )
-                                  , [ LineTo Relative [ ( 10, 10 ) ], LineTo Relative [ ( 20, 20 ) ], ClosePath ]
-                                  )
+                        )
+        , test "moveto drawto command groups lines" <|
+            \_ ->
+                Parser.run moveToDrawToCommandGroups serious
+                    |> Expect.equal
+                        (Ok
+                            [ ( MoveTo Absolute ( 600, 350 )
+                              , [ LineTo Relative [ ( 10, 10 ) ], LineTo Relative [ ( 20, 20 ) ], ClosePath ]
+                              )
+                            ]
+                        )
+        , test "moveto drawto command groups curves" <|
+            \_ ->
+                Parser.run moveToDrawToCommandGroups curves
+                    |> Expect.equal
+                        (Ok
+                            [ ( MoveTo Absolute ( 213.1, 6.7 )
+                              , [ CurveTo Absolute [ ( ( 110.6, 4.9 ), ( 67.5, -9.5 ), ( 36.9, 6.7 ) ) ]
+                                , CurveTo Relative [ ( ( -32.4, -14.4 ), ( -73.7, 0 ), ( -88.1, 30.6 ) ) ]
+                                , CurveTo Absolute [ ( ( 110.6, 4.9 ), ( 67.5, -9.5 ), ( 36.9, 6.7 ) ) ]
+                                , CurveTo Absolute [ ( ( 2.8, 22.9 ), ( -13.4, 62.4 ), ( 13.5, 110.9 ) ) ]
+                                , CurveTo Absolute [ ( ( 33.3, 145.1 ), ( 67.5, 170.3 ), ( 125, 217 ) ) ]
+                                , CurveTo Relative [ ( ( 59.3, -46.7 ), ( 93.5, -71.9 ), ( 111.5, -106.1 ) ) ]
+                                , CurveTo Absolute [ ( ( 263.4, 64.2 ), ( 247.2, 22.9 ), ( 213.1, 6.7 ) ) ]
+                                , ClosePath
                                 ]
-                            )
-            , test "moveto drawto command groups curves" <|
-                \_ ->
-                    Parser.run moveToDrawToCommandGroups curves
-                        |> Expect.equal
-                            (Ok
-                                ([ ( MoveTo Absolute ( 213.1, 6.7 )
-                                   , [ CurveTo Absolute [ ( ( 110.6, 4.9 ), ( 67.5, -9.5 ), ( 36.9, 6.7 ) ) ]
-                                     , CurveTo Relative [ ( ( -32.4, -14.4 ), ( -73.7, 0 ), ( -88.1, 30.6 ) ) ]
-                                     , CurveTo Absolute [ ( ( 110.6, 4.9 ), ( 67.5, -9.5 ), ( 36.9, 6.7 ) ) ]
-                                     , CurveTo Absolute [ ( ( 2.8, 22.9 ), ( -13.4, 62.4 ), ( 13.5, 110.9 ) ) ]
-                                     , CurveTo Absolute [ ( ( 33.3, 145.1 ), ( 67.5, 170.3 ), ( 125, 217 ) ) ]
-                                     , CurveTo Relative [ ( ( 59.3, -46.7 ), ( 93.5, -71.9 ), ( 111.5, -106.1 ) ) ]
-                                     , CurveTo Absolute [ ( ( 263.4, 64.2 ), ( 247.2, 22.9 ), ( 213.1, 6.7 ) ) ]
-                                     , ClosePath
-                                     ]
-                                   )
-                                 ]
-                                )
-                            )
-            , test "relative moveto 0,0" <|
-                \_ ->
-                    Parser.run moveto "m 0,0"
-                        |> Expect.equal (Ok ( MoveTo Relative ( 0, 0 ), Nothing ))
-            , test "lineto argument sequence" <|
-                \_ ->
-                    Parser.run linetoArgumentSequence "10,10 20,20"
-                        |> Expect.equal
-                            (Ok [ ( 10, 10 ), ( 20, 20 ) ])
-            , test "lineto command with multiple arguments " <|
-                \_ ->
-                    Parser.run lineto "l 10,10 20,20"
-                        |> Expect.equal
-                            (Ok (LineTo Relative [ ( 10, 10 ), ( 20, 20 ) ]))
-            ]
+                              )
+                            ]
+                        )
+        , test "relative moveto 0,0" <|
+            \_ ->
+                Parser.run moveto "m 0,0"
+                    |> Expect.equal (Ok ( MoveTo Relative ( 0, 0 ), Nothing ))
+        , test "lineto argument sequence" <|
+            \_ ->
+                Parser.run linetoArgumentSequence "10,10 20,20"
+                    |> Expect.equal
+                        (Ok [ ( 10, 10 ), ( 20, 20 ) ])
+        , test "lineto command with multiple arguments " <|
+            \_ ->
+                Parser.run lineto "l 10,10 20,20"
+                    |> Expect.equal
+                        (Ok (LineTo Relative [ ( 10, 10 ), ( 20, 20 ) ]))
+        ]
 
 
 whitespaceParsing : Test
@@ -122,7 +122,7 @@ coordinatePairParsingProblems =
                     |> Expect.equal (Ok ( 1, 1 ))
         , test "coordinate pairs and separating commaWsp" <|
             \_ ->
-                Parser.run (Parser.succeed (,) |= coordinatePair |. commaWsp |= coordinatePair) "1,1,1,1"
+                Parser.run (Parser.succeed Tuple.pair |= coordinatePair |. commaWsp |= coordinatePair) "1,1,1,1"
                     |> Expect.equal (Ok ( ( 1, 1 ), ( 1, 1 ) ))
         , test "coordinate pairs and separating commaWsp using repeat" <|
             \_ ->
@@ -205,6 +205,7 @@ fuzzMode =
         (\value ->
             if value then
                 Absolute
+
             else
                 Relative
         )
@@ -213,7 +214,7 @@ fuzzMode =
 
 fuzzCoordinate : Fuzzer ( Float, Float )
 fuzzCoordinate =
-    Fuzz.map2 (,)
+    Fuzz.map2 Tuple.pair
         (Fuzz.map toFloat int)
         (Fuzz.map toFloat int)
 
@@ -258,28 +259,28 @@ commands =
             , target = ( 50, -25 )
             }
     in
-        describe "parsing individual commands"
-            [ parseTest moveto "M0,0" ( MoveTo Absolute ( 0, 0 ), Nothing )
-            , parseTest moveto "M0.3,0" ( MoveTo Absolute ( 0.3, 0 ), Nothing )
-            , parseTest moveto "m0,0" ( MoveTo Relative ( 0, 0 ), Nothing )
-            , parseTest moveto "M0,0 20,20" ( MoveTo Absolute ( 0, 0 ), Just (LineTo Absolute [ ( 20, 20 ) ]) )
-            , parseTest moveto "m0,0 20,20" ( MoveTo Relative ( 0, 0 ), Just (LineTo Relative [ ( 20, 20 ) ]) )
-            , parseTest lineto "L0,0" (LineTo Absolute [ ( 0, 0 ) ])
-            , parseTest lineto "l0,0" (LineTo Relative [ ( 0, 0 ) ])
-            , parseTest horizontalLineto "H0 1 2 3" (Horizontal Absolute [ 0, 1, 2, 3 ])
-            , parseTest horizontalLineto "h0 1 2 3" (Horizontal Relative [ 0, 1, 2, 3 ])
-            , parseTest verticalLineto "V0 1 2 3" (Vertical Absolute [ 0, 1, 2, 3 ])
-            , parseTest verticalLineto "v0 1 2 3" (Vertical Relative [ 0, 1, 2, 3 ])
-            , parseTest closepath "Z" ClosePath
-            , parseTest closepath "z" ClosePath
-            , parseTest curveto "C100,100 250,100 250,200" (CurveTo Absolute [ ( ( 100, 100 ), ( 250, 100 ), ( 250, 200 ) ) ])
-            , parseTest curveto "c100,100 250,100 250,200" (CurveTo Relative [ ( ( 100, 100 ), ( 250, 100 ), ( 250, 200 ) ) ])
-            , parseTest smoothCurveto "S400,300 400,200" (SmoothCurveTo Absolute [ ( ( 400, 300 ), ( 400, 200 ) ) ])
-            , parseTest smoothCurveto "s400,300 400,200" (SmoothCurveTo Relative [ ( ( 400, 300 ), ( 400, 200 ) ) ])
-            , parseTest quadraticBezierCurveto "Q400,50 600,300" (QuadraticBezierCurveTo Absolute [ ( ( 400, 50 ), ( 600, 300 ) ) ])
-            , parseTest quadraticBezierCurveto "q400,50 600,300" (QuadraticBezierCurveTo Relative [ ( ( 400, 50 ), ( 600, 300 ) ) ])
-            , parseTest smoothQuadraticBezierCurveto "T1000,300" (SmoothQuadraticBezierCurveTo Absolute [ ( 1000, 300 ) ])
-            , parseTest smoothQuadraticBezierCurveto "t1000,300" (SmoothQuadraticBezierCurveTo Relative [ ( 1000, 300 ) ])
-            , parseTest ellipticalArc "A25,25 -30 0,1 50,-25" (EllipticalArc Absolute [ ellipticalArcExample ])
-            , parseTest ellipticalArc "a25,25 -30 0,1 50,-25" (EllipticalArc Relative [ ellipticalArcExample ])
-            ]
+    describe "parsing individual commands"
+        [ parseTest moveto "M0,0" ( MoveTo Absolute ( 0, 0 ), Nothing )
+        , parseTest moveto "M0.3,0" ( MoveTo Absolute ( 0.3, 0 ), Nothing )
+        , parseTest moveto "m0,0" ( MoveTo Relative ( 0, 0 ), Nothing )
+        , parseTest moveto "M0,0 20,20" ( MoveTo Absolute ( 0, 0 ), Just (LineTo Absolute [ ( 20, 20 ) ]) )
+        , parseTest moveto "m0,0 20,20" ( MoveTo Relative ( 0, 0 ), Just (LineTo Relative [ ( 20, 20 ) ]) )
+        , parseTest lineto "L0,0" (LineTo Absolute [ ( 0, 0 ) ])
+        , parseTest lineto "l0,0" (LineTo Relative [ ( 0, 0 ) ])
+        , parseTest horizontalLineto "H0 1 2 3" (Horizontal Absolute [ 0, 1, 2, 3 ])
+        , parseTest horizontalLineto "h0 1 2 3" (Horizontal Relative [ 0, 1, 2, 3 ])
+        , parseTest verticalLineto "V0 1 2 3" (Vertical Absolute [ 0, 1, 2, 3 ])
+        , parseTest verticalLineto "v0 1 2 3" (Vertical Relative [ 0, 1, 2, 3 ])
+        , parseTest closepath "Z" ClosePath
+        , parseTest closepath "z" ClosePath
+        , parseTest curveto "C100,100 250,100 250,200" (CurveTo Absolute [ ( ( 100, 100 ), ( 250, 100 ), ( 250, 200 ) ) ])
+        , parseTest curveto "c100,100 250,100 250,200" (CurveTo Relative [ ( ( 100, 100 ), ( 250, 100 ), ( 250, 200 ) ) ])
+        , parseTest smoothCurveto "S400,300 400,200" (SmoothCurveTo Absolute [ ( ( 400, 300 ), ( 400, 200 ) ) ])
+        , parseTest smoothCurveto "s400,300 400,200" (SmoothCurveTo Relative [ ( ( 400, 300 ), ( 400, 200 ) ) ])
+        , parseTest quadraticBezierCurveto "Q400,50 600,300" (QuadraticBezierCurveTo Absolute [ ( ( 400, 50 ), ( 600, 300 ) ) ])
+        , parseTest quadraticBezierCurveto "q400,50 600,300" (QuadraticBezierCurveTo Relative [ ( ( 400, 50 ), ( 600, 300 ) ) ])
+        , parseTest smoothQuadraticBezierCurveto "T1000,300" (SmoothQuadraticBezierCurveTo Absolute [ ( 1000, 300 ) ])
+        , parseTest smoothQuadraticBezierCurveto "t1000,300" (SmoothQuadraticBezierCurveTo Relative [ ( 1000, 300 ) ])
+        , parseTest ellipticalArc "A25,25 -30 0,1 50,-25" (EllipticalArc Absolute [ ellipticalArcExample ])
+        , parseTest ellipticalArc "a25,25 -30 0,1 50,-25" (EllipticalArc Relative [ ellipticalArcExample ])
+        ]

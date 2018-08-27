@@ -1,11 +1,13 @@
-module Path.LowLevel.ParserHelpers exposing (..)
+module Path.LowLevel.ParserHelpers exposing (Exponent(..), Sign(..), applyExponent, applySign, comma, commaWsp, coordinatePair, delimited, delimitedEndForbidden, digitSequence, exponent, flag, floatingPointConstant, fractionalConstant, ignore, integerConstant, isWhitespace, join, nonNegativeNumber, number, optional, resultToParser, sign, withDefault, wsp)
 
 {-| Helpers for parsing the primitives of SVG path syntax, based on [this W3C grammar](https://www.w3.org/TR/SVG/paths.html#PathDataBNF).
 -}
 
 import Char
 import Parser exposing (..)
+import Parser.Future as Parser exposing (oneOrMore, zeroOrMore)
 import Path.LowLevel exposing (Coordinate)
+
 
 
 -- Primitives
@@ -20,9 +22,19 @@ resultToParser : Result String a -> Parser a
 resultToParser result =
     case result of
         Err e ->
-            Parser.fail e
+            Parser.problem e
 
         Ok v ->
+            Parser.succeed v
+
+
+maybeToParser : Maybe a -> Parser a
+maybeToParser result =
+    case result of
+        Nothing ->
+            Parser.problem "a Nothing was converted into a parser"
+
+        Just v ->
             Parser.succeed v
 
 
@@ -30,7 +42,7 @@ resultToParser result =
 
 This parser is used to for example parse the comma or whitespace-delimited arguments for a horizontal move
 
-    Parser.run (delimited { delimiter = optional commaWsp, item = number }) "1 2 3 4" == [1,2,3,4]
+    Parser.run (delimited { delimiter = optional commaWsp, item = number }) "1 2 3 4" == [ 1, 2, 3, 4 ]
 
 -}
 delimited : { delimiter : Parser (), item : Parser a } -> Parser (List a)
@@ -45,14 +57,20 @@ delimited { delimiter, item } =
 delimitedEndForbidden : Parser a -> Parser () -> List a -> Parser (List a)
 delimitedEndForbidden parseItem delimiter revItems =
     let
+        chompRest : a -> Parser (List a)
         chompRest item =
             delimitedEndForbidden parseItem delimiter (item :: revItems)
     in
-        oneOf
-            [ delayedCommit delimiter <|
-                andThen chompRest parseItem
-            , succeed (List.reverse revItems)
-            ]
+    oneOf
+        [ Parser.backtrackable
+            (Parser.succeed (\x -> x)
+                |. delimiter
+                |. Parser.commit ()
+                |= parseItem
+                |> andThen chompRest
+            )
+        , succeed (List.reverse revItems)
+        ]
 
 
 type Sign
@@ -64,17 +82,20 @@ sign : Parser Sign
 sign =
     oneOf
         [ symbol "-"
-            |- succeed Minus
+            |> ignore (succeed Minus)
         , symbol "+"
-            |- succeed Plus
+            |> ignore (succeed Plus)
         ]
 
 
 digitSequence : Parser Int
 digitSequence =
     Parser.keep oneOrMore Char.isDigit
-        |> Parser.andThen (String.toInt >> resultToParser)
-        |> inContext "digit sequence"
+        |> Parser.andThen (String.toInt >> maybeToParser)
+
+
+
+-- |> inContext "digit sequence"
 
 
 type Exponent
@@ -94,42 +115,47 @@ fractionalConstant : Parser Float
 fractionalConstant =
     let
         helper left right =
-            String.toFloat (toString left ++ "." ++ toString right)
-                |> resultToParser
+            String.toFloat (String.fromInt left ++ "." ++ String.fromInt right)
+                |> maybeToParser
     in
-        join <|
-            oneOf
-                -- only commit to a fractional when the '.' is parsed
-                [ delayedCommitMap helper (withDefault 0 digitSequence |. symbol ".") digitSequence
-                , delayedCommitMap helper (withDefault 0 digitSequence |. symbol ".") <| succeed 0
-                ]
+    withDefault 0 digitSequence
+        |. symbol "."
+        |> Parser.andThen
+            (\leftOfDot ->
+                Parser.succeed (\rightOfDot -> helper leftOfDot rightOfDot)
+                    |= oneOf
+                        [ digitSequence
+                        , Parser.succeed 0
+                        ]
+            )
+        |> join
 
 
 applyExponent : Float -> Exponent -> Parser Float
 applyExponent float (Exponent exp) =
-    String.toFloat (toString float ++ "e" ++ toString exp)
-        |> resultToParser
+    String.toFloat (String.fromFloat float ++ "e" ++ String.fromInt exp)
+        |> maybeToParser
 
 
 floatingPointConstant : Parser Float
 floatingPointConstant =
-    inContext "floating point constant" <|
-        join <|
-            oneOf
-                [ try <|
-                    succeed applyExponent
-                        |= fractionalConstant
-                        |= withDefault (Exponent 0) exponent
-                , succeed applyExponent
-                    |= Parser.map toFloat digitSequence
+    -- inContext "floating point constant" <|
+    join <|
+        oneOf
+            [ backtrackable <|
+                succeed applyExponent
+                    |= fractionalConstant
                     |= withDefault (Exponent 0) exponent
-                ]
+            , succeed applyExponent
+                |= Parser.map toFloat digitSequence
+                |= withDefault (Exponent 0) exponent
+            ]
 
 
 integerConstant : Parser Int
 integerConstant =
-    inContext "integer constant" <|
-        digitSequence
+    -- inContext "integer constant" <|
+    digitSequence
 
 
 comma : Parser ()
@@ -139,54 +165,50 @@ comma =
 
 wsp : Parser ()
 wsp =
-    inContext "whitespace" <|
-        -- (#x20 | #x9 | #xD | #xA)
-        oneOf [ symbol " ", symbol "\t", symbol "\x0D", symbol "\n" ]
+    -- inContext "whitespace" <|
+    -- (#x20 | #x9 | #xD | #xA)
+    -- previously included \x0D
+    oneOf [ symbol " ", symbol "\t", symbol "\n" ]
 
 
 isWhitespace : Char -> Bool
 isWhitespace char =
-    char == ' ' || char == '\t' || char == '\x0D' || char == '\n'
+    char == ' ' || char == '\t' || char == '\n'
 
 
 commaWsp : Parser ()
 commaWsp =
-    inContext "comma or whitespace" <|
-        oneOf
-            [ succeed ()
-                |. Parser.ignore oneOrMore isWhitespace
-                |. withDefault () comma
-                |. Parser.ignore zeroOrMore isWhitespace
-            , succeed ()
-                |. comma
-                |. Parser.ignore zeroOrMore isWhitespace
-            ]
+    -- inContext "comma or whitespace" <|
+    oneOf
+        [ succeed ()
+            |. Parser.ignore oneOrMore isWhitespace
+            |. withDefault () comma
+            |. Parser.ignore zeroOrMore isWhitespace
+        , succeed ()
+            |. comma
+            |. Parser.ignore zeroOrMore isWhitespace
+        ]
 
 
 flag : Parser Int
 flag =
-    inContext "flag" <|
-        oneOf
-            [ symbol "1"
-                |> Parser.map (\_ -> 1)
-            , symbol "0"
-                |> Parser.map (\_ -> 0)
-            ]
+    -- inContext "flag" <|
+    oneOf
+        [ symbol "1"
+            |> Parser.map (\_ -> 1)
+        , symbol "0"
+            |> Parser.map (\_ -> 0)
+        ]
 
 
 applySign : Sign -> number -> number
-applySign sign num =
-    case sign of
+applySign currentSign num =
+    case currentSign of
         Plus ->
             num
 
         Minus ->
             -num
-
-
-try : Parser a -> Parser a
-try parser =
-    delayedCommitMap always parser (succeed ())
 
 
 number : Parser Float
@@ -204,25 +226,25 @@ number =
 
 nonNegativeNumber : Parser Float
 nonNegativeNumber =
-    inContext "non-negative number" <|
-        oneOf
-            [ succeed identity
-                |. withDefault () (symbol "+")
-                |= floatingPointConstant
-            , succeed identity
-                |. withDefault () (symbol "+")
-                |= integerConstant
-                |> Parser.map toFloat
-            ]
+    -- inContext "non-negative number" <|
+    oneOf
+        [ succeed identity
+            |. withDefault () (symbol "+")
+            |= floatingPointConstant
+        , succeed identity
+            |. withDefault () (symbol "+")
+            |= integerConstant
+            |> Parser.map toFloat
+        ]
 
 
 coordinatePair : Parser Coordinate
 coordinatePair =
-    inContext "coordinate pair" <|
-        succeed (,)
-            |= number
-            |. optional commaWsp
-            |= number
+    -- inContext "coordinate pair" <|
+    succeed Tuple.pair
+        |= number
+        |. optional commaWsp
+        |= number
 
 
 
@@ -243,13 +265,21 @@ optional : Parser a -> Parser ()
 optional parser =
     oneOf
         [ parser
-            |- succeed ()
+            |> ignore (succeed ())
         , succeed ()
         ]
 
 
-{-| Ignore everything that came before, start fresh
+ignore : Parser keep -> Parser ignore -> Parser keep
+ignore keepParser ignoreParser =
+    ignoreParser |> Parser.andThen (\_ -> keepParser)
+
+
+
+{-
+   {-| Ignore everything that came before, start fresh
+   -}
+   (|-) : Parser ignore -> Parser keep -> Parser keep
+   (|-) ignoreParser keepParser =
+       map2 (\_ keep -> keep) ignoreParser keepParser
 -}
-(|-) : Parser ignore -> Parser keep -> Parser keep
-(|-) ignoreParser keepParser =
-    map2 (\_ keep -> keep) ignoreParser keepParser

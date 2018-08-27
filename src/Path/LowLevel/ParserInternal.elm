@@ -1,9 +1,10 @@
-module Path.LowLevel.ParserInternal exposing (..)
+module Path.LowLevel.ParserInternal exposing (closepath, command, curveto, curvetoArgument, curvetoArgumentSequence, drawtoCommand, drawtoCommands, ellipticalArc, ellipticalArcArgument, ellipticalArcArgumentSequence, horizontalLineto, horizontalLinetoArgumentSequence, lineto, linetoArgumentSequence, moveToDrawToCommandGroup, moveToDrawToCommandGroups, moveto, movetoArgumentSequence, quadraticBezierCurveto, quadraticBezierCurvetoArgument, quadraticBezierCurvetoArgumentSequence, smoothCurveto, smoothCurvetoArgument, smoothCurvetoArgumentSequence, smoothQuadraticBezierCurveto, smoothQuadraticBezierCurvetoArgumentSequence, svgMixedPath, svgMixedSubPath, verticalLineto, verticalLinetoArgumentSequence)
 
 import Char
-import Parser exposing ((|.), (|=), Parser, inContext, oneOf, oneOrMore, succeed, symbol, zeroOrMore)
+import Parser exposing ((|.), (|=), Parser, oneOf, succeed, symbol)
+import Parser.Future as Parser exposing (oneOrMore, zeroOrMore)
 import Path.LowLevel exposing (..)
-import Path.LowLevel.ParserHelpers exposing ((|-), commaWsp, coordinatePair, delimited, flag, isWhitespace, join, nonNegativeNumber, number, optional, withDefault, wsp)
+import Path.LowLevel.ParserHelpers exposing (commaWsp, coordinatePair, delimited, flag, isWhitespace, join, nonNegativeNumber, number, optional, withDefault, wsp)
 
 
 {-| A parser for path data, based on the [specification's grammar](https://www.w3.org/TR/SVG/paths.html#PathDataBNF)
@@ -33,7 +34,7 @@ moveToDrawToCommandGroups =
 
 moveToDrawToCommandGroup : Parser ( MoveTo, List DrawTo )
 moveToDrawToCommandGroup =
-    inContext "moveto drawto command group" <|
+    Parser.inContext "moveto drawto command group" <|
         Parser.succeed
             (\( move, linetos ) drawtos ->
                 case linetos of
@@ -50,7 +51,7 @@ moveToDrawToCommandGroup =
 
 drawtoCommands : Parser (List DrawTo)
 drawtoCommands =
-    inContext "drawto commands" <|
+    Parser.inContext "drawto commands" <|
         delimited { item = drawtoCommand, delimiter = Parser.ignore zeroOrMore isWhitespace }
 
 
@@ -76,18 +77,15 @@ moveto =
        * if a moveto is followed by extra coordinate pairs, they are interpreted as lineto commands (relative when the moveto is relative, absolute otherwise).
        * the first moveto in a path is always interpreted as absolute (but following linetos are still relative)
     -}
-    inContext "moveto" <|
+    Parser.inContext "moveto" <|
         command
             { constructor =
                 \mode coordinates ->
                     case coordinates of
-                        [] ->
-                            Debug.crash "movetoArgumentSequence succeeded but parsed no coordinates"
-
-                        [ c ] ->
+                        ( c, [] ) ->
                             ( MoveTo mode c, Nothing )
 
-                        c :: cs ->
+                        ( c, cs ) ->
                             -- cs has at least size 1
                             ( MoveTo mode c, Just (LineTo mode cs) )
             , character = 'm'
@@ -95,26 +93,35 @@ moveto =
             }
 
 
-movetoArgumentSequence : Parser (List Coordinate)
+movetoArgumentSequence : Parser ( Coordinate, List Coordinate )
 movetoArgumentSequence =
     delimited { item = coordinatePair, delimiter = withDefault () commaWsp }
+        |> Parser.andThen
+            (\coordinatesList ->
+                case coordinatesList of
+                    [] ->
+                        Parser.problem "moveto argument sequence needs at least one coordinate, got none"
+
+                    x :: xs ->
+                        Parser.succeed ( x, xs )
+            )
 
 
 closepath : Parser DrawTo
 closepath =
     -- per the w3c spec "Since the Z and z commands take no parameters, they have an identical effect."
-    inContext "closepath" <|
+    Parser.inContext "closepath" <|
         oneOf
             [ symbol "z"
-                |- succeed ClosePath
+                |> Parser.map (\_ -> ClosePath)
             , symbol "Z"
-                |- succeed ClosePath
+                |> Parser.map (\_ -> ClosePath)
             ]
 
 
 lineto : Parser DrawTo
 lineto =
-    inContext "lineto" <|
+    Parser.inContext "lineto" <|
         command
             { constructor = LineTo
             , character = 'l'
@@ -129,7 +136,7 @@ linetoArgumentSequence =
 
 horizontalLineto : Parser DrawTo
 horizontalLineto =
-    inContext "horizontal lineto" <|
+    Parser.inContext "horizontal lineto" <|
         command
             { constructor = Horizontal
             , character = 'h'
@@ -144,7 +151,7 @@ horizontalLinetoArgumentSequence =
 
 verticalLineto : Parser DrawTo
 verticalLineto =
-    inContext "vertical lineto" <|
+    Parser.inContext "vertical lineto" <|
         command
             { constructor = Vertical
             , character = 'v'
@@ -159,7 +166,7 @@ verticalLinetoArgumentSequence =
 
 curveto : Parser DrawTo
 curveto =
-    inContext "curveto" <|
+    Parser.inContext "curveto" <|
         command
             { constructor = CurveTo
             , character = 'c'
@@ -174,7 +181,7 @@ curvetoArgumentSequence =
 
 curvetoArgument : Parser ( Coordinate, Coordinate, Coordinate )
 curvetoArgument =
-    succeed (,,)
+    succeed (\pair1 pair2 pair3 -> ( pair1, pair2, pair3 ))
         |= coordinatePair
         |. withDefault () commaWsp
         |= coordinatePair
@@ -184,7 +191,7 @@ curvetoArgument =
 
 smoothCurveto : Parser DrawTo
 smoothCurveto =
-    inContext "smooth curveto" <|
+    Parser.inContext "smooth curveto" <|
         command
             { constructor = SmoothCurveTo
             , character = 's'
@@ -199,7 +206,7 @@ smoothCurvetoArgumentSequence =
 
 smoothCurvetoArgument : Parser ( Coordinate, Coordinate )
 smoothCurvetoArgument =
-    succeed (,)
+    succeed Tuple.pair
         |= coordinatePair
         |. withDefault () commaWsp
         |= coordinatePair
@@ -207,7 +214,7 @@ smoothCurvetoArgument =
 
 quadraticBezierCurveto : Parser DrawTo
 quadraticBezierCurveto =
-    inContext "quadratic bezier curveto" <|
+    Parser.inContext "quadratic bezier curveto" <|
         command
             { constructor = QuadraticBezierCurveTo
             , character = 'q'
@@ -217,7 +224,7 @@ quadraticBezierCurveto =
 
 quadraticBezierCurvetoArgumentSequence : Parser (List ( Coordinate, Coordinate ))
 quadraticBezierCurvetoArgumentSequence =
-    inContext "quadratic bezier curveto argument sequence" <|
+    Parser.inContext "quadratic bezier curveto argument sequence" <|
         delimited { item = quadraticBezierCurvetoArgument, delimiter = withDefault () commaWsp }
 
 
@@ -227,7 +234,7 @@ quadraticBezierCurvetoArgumentSequence =
 
 quadraticBezierCurvetoArgument : Parser ( Coordinate, Coordinate )
 quadraticBezierCurvetoArgument =
-    succeed (,)
+    succeed Tuple.pair
         |= coordinatePair
         |. withDefault () commaWsp
         |= coordinatePair
@@ -235,7 +242,7 @@ quadraticBezierCurvetoArgument =
 
 smoothQuadraticBezierCurveto : Parser DrawTo
 smoothQuadraticBezierCurveto =
-    inContext "smooth quadratic bezier curveto" <|
+    Parser.inContext "smooth quadratic bezier curveto" <|
         command
             { constructor = SmoothQuadraticBezierCurveTo
             , character = 't'
@@ -250,7 +257,7 @@ smoothQuadraticBezierCurvetoArgumentSequence =
 
 ellipticalArc : Parser DrawTo
 ellipticalArc =
-    inContext "elliptical arc" <|
+    Parser.inContext "elliptical arc" <|
         command
             { constructor = EllipticalArc
             , character = 'a'
@@ -278,7 +285,7 @@ ellipticalArcArgument =
                         }
 
                 Nothing ->
-                    Parser.fail "could not parse the arc and sweep flags"
+                    Parser.problem "could not parse the arc and sweep flags"
     in
     succeed helper
         |= nonNegativeNumber
