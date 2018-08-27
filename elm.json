@@ -2,7 +2,7 @@
     "type": "package",
     "name": "folkertdev/svg-path-lowlevel",
     "summary": "Parser and pretty printer for SVG paths",
-    "license": "MPL-2.0",
+    "license": "BSD-3-Clause",
     "version": "1.0.0",
     "exposed-modules": [
         "Path.LowLevel",
