@@ -1,24 +1,37 @@
-module Path.LowLevel.ParserHelpers exposing (Exponent(..), Sign(..), applyExponent, applySign, comma, commaWsp, coordinatePair, delimited, delimitedEndForbidden, digitSequence, exponent, flag, floatingPointConstant, fractionalConstant, ignore, integerConstant, isWhitespace, join, nonNegativeNumber, number, optional, resultToParser, sign, withDefault, wsp)
+module Path.LowLevel.ParserHelpers exposing (Exponent(..), Problem(..), Sign(..), applyExponent, applySign, comma, commaWsp, coordinatePair, delimited, delimitedEndForbidden, digitSequence, exponent, flag, floatingPointConstant, fractionalConstant, ignore, integerConstant, isWhitespace, join, nonNegativeNumber, number, optional, resultToParser, sign, withDefault, wsp)
 
 {-| Helpers for parsing the primitives of SVG path syntax, based on [this W3C grammar](https://www.w3.org/TR/SVG/paths.html#PathDataBNF).
 -}
 
 import Char
-import Parser exposing (..)
+import Parser.Advanced as Parser exposing (..)
 import Parser.Future as Parser exposing (oneOrMore, zeroOrMore)
 import Path.LowLevel exposing (Coordinate)
+
+
+type Problem
+    = ExpectingMinus
+    | ExpectingPlus
+    | ExpectingExponent
+    | ExpectingDot
+    | ExpectingComma
+    | ExpectingWhitespace
+    | ExpectingFlag
+    | ExpectedIntegerSequence { got : String }
+    | ExpectedFloat { got : String }
+    | ExpectedEnd
 
 
 
 -- Primitives
 
 
-join : Parser (Parser a) -> Parser a
+join : Parser c p (Parser c p a) -> Parser c p a
 join =
     Parser.andThen identity
 
 
-resultToParser : Result String a -> Parser a
+resultToParser : Result p a -> Parser c p a
 resultToParser result =
     case result of
         Err e ->
@@ -28,7 +41,7 @@ resultToParser result =
             Parser.succeed v
 
 
-maybeToParser : Maybe a -> Parser a
+maybeToParser : Maybe a -> Parser c String a
 maybeToParser result =
     case result of
         Nothing ->
@@ -45,7 +58,7 @@ This parser is used to for example parse the comma or whitespace-delimited argum
     Parser.run (delimited { delimiter = optional commaWsp, item = number }) "1 2 3 4" == [ 1, 2, 3, 4 ]
 
 -}
-delimited : { delimiter : Parser (), item : Parser a } -> Parser (List a)
+delimited : { delimiter : Parser c p (), item : Parser c p a } -> Parser c p (List a)
 delimited { delimiter, item } =
     oneOf
         [ item
@@ -54,10 +67,10 @@ delimited { delimiter, item } =
         ]
 
 
-delimitedEndForbidden : Parser a -> Parser () -> List a -> Parser (List a)
+delimitedEndForbidden : Parser c p a -> Parser c p () -> List a -> Parser c p (List a)
 delimitedEndForbidden parseItem delimiter revItems =
     let
-        chompRest : a -> Parser (List a)
+        chompRest : a -> Parser c p (List a)
         chompRest item =
             delimitedEndForbidden parseItem delimiter (item :: revItems)
     in
@@ -78,66 +91,90 @@ type Sign
     | Minus
 
 
-sign : Parser Sign
+plus =
+    Parser.Token "-" ExpectingPlus
+
+
+minus =
+    Parser.Token "+" ExpectingMinus
+
+
+sign : Parser c Problem Sign
 sign =
     oneOf
-        [ symbol "-"
+        [ symbol minus
             |> ignore (succeed Minus)
-        , symbol "+"
+        , symbol plus
             |> ignore (succeed Plus)
         ]
 
 
-digitSequence : Parser Int
+digitSequence : Parser c Problem Int
 digitSequence =
-    Parser.keep oneOrMore Char.isDigit
-        |> Parser.andThen (String.toInt >> maybeToParser)
+    let
+        validator rawString =
+            case String.toInt rawString of
+                Just value ->
+                    Parser.succeed value
 
-
-
--- |> inContext "digit sequence"
+                Nothing ->
+                    Parser.problem (ExpectedIntegerSequence { got = rawString })
+    in
+    Parser.chompWhile Char.isDigit
+        |> Parser.getChompedString
+        |> Parser.andThen validator
 
 
 type Exponent
     = Exponent Int
 
 
-exponent : Parser Exponent
+exponent : Parser c Problem Exponent
 exponent =
     Parser.map Exponent <|
         succeed applySign
-            |. oneOf [ symbol "e", symbol "E" ]
+            |. oneOf [ symbol (Token "e" ExpectingExponent), symbol (Token "E" ExpectingExponent) ]
             |= withDefault Plus sign
             |= digitSequence
 
 
-fractionalConstant : Parser Float
+fractionalConstant : Parser c Problem Float
 fractionalConstant =
     let
         helper left right =
-            String.toFloat (String.fromInt left ++ "." ++ String.fromInt right)
-                |> maybeToParser
+            let
+                rawString =
+                    String.fromInt left ++ "." ++ String.fromInt right
+            in
+            case String.toFloat rawString of
+                Nothing ->
+                    Parser.problem (ExpectedFloat { got = rawString })
+
+                Just value ->
+                    Parser.succeed value
     in
-    withDefault 0 digitSequence
-        |. symbol "."
-        |> Parser.andThen
-            (\leftOfDot ->
-                Parser.succeed (\rightOfDot -> helper leftOfDot rightOfDot)
-                    |= oneOf
-                        [ digitSequence
-                        , Parser.succeed 0
-                        ]
-            )
+    Parser.succeed helper
+        |= withDefault 0 digitSequence
+        |. symbol (Token "." ExpectingDot)
+        |= withDefault 0 digitSequence
         |> join
 
 
-applyExponent : Float -> Exponent -> Parser Float
+applyExponent : Float -> Exponent -> Parser c Problem Float
 applyExponent float (Exponent exp) =
-    String.toFloat (String.fromFloat float ++ "e" ++ String.fromInt exp)
-        |> maybeToParser
+    let
+        rawString =
+            String.fromFloat float ++ "e" ++ String.fromInt exp
+    in
+    case String.toFloat rawString of
+        Nothing ->
+            Parser.problem (ExpectedFloat { got = rawString })
+
+        Just value ->
+            Parser.succeed value
 
 
-floatingPointConstant : Parser Float
+floatingPointConstant : Parser c Problem Float
 floatingPointConstant =
     -- inContext "floating point constant" <|
     join <|
@@ -152,23 +189,27 @@ floatingPointConstant =
             ]
 
 
-integerConstant : Parser Int
+integerConstant : Parser c Problem Int
 integerConstant =
     -- inContext "integer constant" <|
     digitSequence
 
 
-comma : Parser ()
+comma : Parser c Problem ()
 comma =
-    symbol ","
+    symbol (Token "," ExpectingComma)
 
 
-wsp : Parser ()
+wsp : Parser c Problem ()
 wsp =
     -- inContext "whitespace" <|
     -- (#x20 | #x9 | #xD | #xA)
     -- previously included \x0D
-    oneOf [ symbol " ", symbol "\t", symbol "\n" ]
+    oneOf
+        [ symbol (Token " " ExpectingWhitespace)
+        , symbol (Token "\t" ExpectingWhitespace)
+        , symbol (Token "\n" ExpectingWhitespace)
+        ]
 
 
 isWhitespace : Char -> Bool
@@ -176,27 +217,27 @@ isWhitespace char =
     char == ' ' || char == '\t' || char == '\n'
 
 
-commaWsp : Parser ()
+commaWsp : Parser c Problem ()
 commaWsp =
     -- inContext "comma or whitespace" <|
     oneOf
         [ succeed ()
-            |. Parser.ignore oneOrMore isWhitespace
+            |. Parser.chompWhile isWhitespace
             |. withDefault () comma
-            |. Parser.ignore zeroOrMore isWhitespace
+            |. Parser.chompWhile isWhitespace
         , succeed ()
             |. comma
-            |. Parser.ignore zeroOrMore isWhitespace
+            |. Parser.chompWhile isWhitespace
         ]
 
 
-flag : Parser Int
+flag : Parser c Problem Int
 flag =
     -- inContext "flag" <|
     oneOf
-        [ symbol "1"
+        [ symbol (Token "1" ExpectingFlag)
             |> Parser.map (\_ -> 1)
-        , symbol "0"
+        , symbol (Token "0" ExpectingFlag)
             |> Parser.map (\_ -> 0)
         ]
 
@@ -211,7 +252,7 @@ applySign currentSign num =
             -num
 
 
-number : Parser Float
+number : Parser c Problem Float
 number =
     oneOf
         [ succeed applySign
@@ -224,21 +265,21 @@ number =
         ]
 
 
-nonNegativeNumber : Parser Float
+nonNegativeNumber : Parser c Problem Float
 nonNegativeNumber =
     -- inContext "non-negative number" <|
     oneOf
         [ succeed identity
-            |. withDefault () (symbol "+")
+            |. withDefault () (symbol (Token "+" ExpectingPlus))
             |= floatingPointConstant
         , succeed identity
-            |. withDefault () (symbol "+")
+            |. withDefault () (symbol (Token "+" ExpectingPlus))
             |= integerConstant
             |> Parser.map toFloat
         ]
 
 
-coordinatePair : Parser Coordinate
+coordinatePair : Parser c Problem Coordinate
 coordinatePair =
     -- inContext "coordinate pair" <|
     succeed Tuple.pair
@@ -253,7 +294,7 @@ coordinatePair =
 
 {-| Try a parser. If it fails, give back the default value
 -}
-withDefault : a -> Parser a -> Parser a
+withDefault : a -> Parser c p a -> Parser c p a
 withDefault default parser =
     oneOf [ parser, succeed default ]
 
@@ -261,7 +302,7 @@ withDefault default parser =
 {-| Parse zero or one values of a given parser.
 This function is often written as a `?` in grammars, so `int?` is `optional int`
 -}
-optional : Parser a -> Parser ()
+optional : Parser c p a -> Parser c p ()
 optional parser =
     oneOf
         [ parser
@@ -270,7 +311,7 @@ optional parser =
         ]
 
 
-ignore : Parser keep -> Parser ignore -> Parser keep
+ignore : Parser c p keep -> Parser c p ignore -> Parser c p keep
 ignore keepParser ignoreParser =
     ignoreParser |> Parser.andThen (\_ -> keepParser)
 

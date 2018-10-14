@@ -1,38 +1,42 @@
 module Path.LowLevel.ParserInternal exposing (closepath, command, curveto, curvetoArgument, curvetoArgumentSequence, drawtoCommand, drawtoCommands, ellipticalArc, ellipticalArcArgument, ellipticalArcArgumentSequence, horizontalLineto, horizontalLinetoArgumentSequence, lineto, linetoArgumentSequence, moveToDrawToCommandGroup, moveToDrawToCommandGroups, moveto, movetoArgumentSequence, quadraticBezierCurveto, quadraticBezierCurvetoArgument, quadraticBezierCurvetoArgumentSequence, smoothCurveto, smoothCurvetoArgument, smoothCurvetoArgumentSequence, smoothQuadraticBezierCurveto, smoothQuadraticBezierCurvetoArgumentSequence, svgMixedPath, svgMixedSubPath, verticalLineto, verticalLinetoArgumentSequence)
 
 import Char
-import Parser exposing ((|.), (|=), Parser, oneOf, succeed, symbol)
+import Parser.Advanced as Parser exposing ((|.), (|=), Parser, oneOf, succeed, symbol)
 import Parser.Future as Parser exposing (oneOrMore, zeroOrMore)
 import Path.LowLevel exposing (..)
-import Path.LowLevel.ParserHelpers exposing (commaWsp, coordinatePair, delimited, flag, isWhitespace, join, nonNegativeNumber, number, optional, withDefault, wsp)
+import Path.LowLevel.ParserHelpers as ParserHelpers exposing (Problem(..), commaWsp, coordinatePair, delimited, flag, isWhitespace, join, nonNegativeNumber, number, optional, withDefault, wsp)
+
+
+type alias CustomParser a =
+    Parser.Parser String ParserHelpers.Problem a
 
 
 {-| A parser for path data, based on the [specification's grammar](https://www.w3.org/TR/SVG/paths.html#PathDataBNF)
 -}
-svgMixedPath : Parser (List ( MoveTo, List DrawTo ))
+svgMixedPath : CustomParser (List ( MoveTo, List DrawTo ))
 svgMixedPath =
     Parser.succeed identity
-        |. Parser.ignore zeroOrMore isWhitespace
+        |. Parser.chompWhile isWhitespace
         |= withDefault [] moveToDrawToCommandGroups
-        |. Parser.ignore zeroOrMore isWhitespace
-        |. Parser.end
+        |. Parser.chompWhile isWhitespace
+        |. Parser.end ExpectedEnd
 
 
-svgMixedSubPath : Parser ( MoveTo, List DrawTo )
+svgMixedSubPath : CustomParser ( MoveTo, List DrawTo )
 svgMixedSubPath =
     Parser.succeed identity
-        |. Parser.ignore zeroOrMore isWhitespace
+        |. Parser.chompWhile isWhitespace
         |= moveToDrawToCommandGroup
-        |. Parser.ignore zeroOrMore isWhitespace
-        |. Parser.end
+        |. Parser.chompWhile isWhitespace
+        |. Parser.end ExpectedEnd
 
 
-moveToDrawToCommandGroups : Parser (List ( MoveTo, List DrawTo ))
+moveToDrawToCommandGroups : CustomParser (List ( MoveTo, List DrawTo ))
 moveToDrawToCommandGroups =
-    delimited { item = moveToDrawToCommandGroup, delimiter = Parser.ignore zeroOrMore isWhitespace }
+    delimited { item = moveToDrawToCommandGroup, delimiter = Parser.chompWhile isWhitespace }
 
 
-moveToDrawToCommandGroup : Parser ( MoveTo, List DrawTo )
+moveToDrawToCommandGroup : CustomParser ( MoveTo, List DrawTo )
 moveToDrawToCommandGroup =
     Parser.inContext "moveto drawto command group" <|
         Parser.succeed
@@ -45,17 +49,17 @@ moveToDrawToCommandGroup =
                         ( move, lt :: drawtos )
             )
             |= moveto
-            |. Parser.ignore zeroOrMore isWhitespace
+            |. Parser.chompWhile isWhitespace
             |= withDefault [] drawtoCommands
 
 
-drawtoCommands : Parser (List DrawTo)
+drawtoCommands : CustomParser (List DrawTo)
 drawtoCommands =
     Parser.inContext "drawto commands" <|
-        delimited { item = drawtoCommand, delimiter = Parser.ignore zeroOrMore isWhitespace }
+        delimited { item = drawtoCommand, delimiter = Parser.chompWhile isWhitespace }
 
 
-drawtoCommand : Parser DrawTo
+drawtoCommand : CustomParser DrawTo
 drawtoCommand =
     oneOf
         [ closepath
@@ -70,7 +74,7 @@ drawtoCommand =
         ]
 
 
-moveto : Parser ( MoveTo, Maybe DrawTo )
+moveto : CustomParser ( MoveTo, Maybe DrawTo )
 moveto =
     {- moveto has some corner cases
 
@@ -93,7 +97,7 @@ moveto =
             }
 
 
-movetoArgumentSequence : Parser ( Coordinate, List Coordinate )
+movetoArgumentSequence : CustomParser ( Coordinate, List Coordinate )
 movetoArgumentSequence =
     delimited { item = coordinatePair, delimiter = withDefault () commaWsp }
         |> Parser.andThen
@@ -107,7 +111,7 @@ movetoArgumentSequence =
             )
 
 
-closepath : Parser DrawTo
+closepath : CustomParser DrawTo
 closepath =
     -- per the w3c spec "Since the Z and z commands take no parameters, they have an identical effect."
     Parser.inContext "closepath" <|
@@ -119,7 +123,7 @@ closepath =
             ]
 
 
-lineto : Parser DrawTo
+lineto : CustomParser DrawTo
 lineto =
     Parser.inContext "lineto" <|
         command
@@ -129,12 +133,12 @@ lineto =
             }
 
 
-linetoArgumentSequence : Parser (List Coordinate)
+linetoArgumentSequence : CustomParser (List Coordinate)
 linetoArgumentSequence =
     delimited { item = coordinatePair, delimiter = withDefault () commaWsp }
 
 
-horizontalLineto : Parser DrawTo
+horizontalLineto : CustomParser DrawTo
 horizontalLineto =
     Parser.inContext "horizontal lineto" <|
         command
@@ -144,12 +148,12 @@ horizontalLineto =
             }
 
 
-horizontalLinetoArgumentSequence : Parser (List Float)
+horizontalLinetoArgumentSequence : CustomParser (List Float)
 horizontalLinetoArgumentSequence =
     delimited { item = number, delimiter = withDefault () commaWsp }
 
 
-verticalLineto : Parser DrawTo
+verticalLineto : CustomParser DrawTo
 verticalLineto =
     Parser.inContext "vertical lineto" <|
         command
@@ -159,12 +163,12 @@ verticalLineto =
             }
 
 
-verticalLinetoArgumentSequence : Parser (List Float)
+verticalLinetoArgumentSequence : CustomParser (List Float)
 verticalLinetoArgumentSequence =
     delimited { item = number, delimiter = withDefault () commaWsp }
 
 
-curveto : Parser DrawTo
+curveto : CustomParser DrawTo
 curveto =
     Parser.inContext "curveto" <|
         command
@@ -174,12 +178,12 @@ curveto =
             }
 
 
-curvetoArgumentSequence : Parser (List ( Coordinate, Coordinate, Coordinate ))
+curvetoArgumentSequence : CustomParser (List ( Coordinate, Coordinate, Coordinate ))
 curvetoArgumentSequence =
     delimited { item = curvetoArgument, delimiter = withDefault () commaWsp }
 
 
-curvetoArgument : Parser ( Coordinate, Coordinate, Coordinate )
+curvetoArgument : CustomParser ( Coordinate, Coordinate, Coordinate )
 curvetoArgument =
     succeed (\pair1 pair2 pair3 -> ( pair1, pair2, pair3 ))
         |= coordinatePair
@@ -189,7 +193,7 @@ curvetoArgument =
         |= coordinatePair
 
 
-smoothCurveto : Parser DrawTo
+smoothCurveto : CustomParser DrawTo
 smoothCurveto =
     Parser.inContext "smooth curveto" <|
         command
@@ -199,12 +203,12 @@ smoothCurveto =
             }
 
 
-smoothCurvetoArgumentSequence : Parser (List ( Coordinate, Coordinate ))
+smoothCurvetoArgumentSequence : CustomParser (List ( Coordinate, Coordinate ))
 smoothCurvetoArgumentSequence =
     delimited { item = smoothCurvetoArgument, delimiter = withDefault () commaWsp }
 
 
-smoothCurvetoArgument : Parser ( Coordinate, Coordinate )
+smoothCurvetoArgument : CustomParser ( Coordinate, Coordinate )
 smoothCurvetoArgument =
     succeed Tuple.pair
         |= coordinatePair
@@ -212,7 +216,7 @@ smoothCurvetoArgument =
         |= coordinatePair
 
 
-quadraticBezierCurveto : Parser DrawTo
+quadraticBezierCurveto : CustomParser DrawTo
 quadraticBezierCurveto =
     Parser.inContext "quadratic bezier curveto" <|
         command
@@ -222,7 +226,7 @@ quadraticBezierCurveto =
             }
 
 
-quadraticBezierCurvetoArgumentSequence : Parser (List ( Coordinate, Coordinate ))
+quadraticBezierCurvetoArgumentSequence : CustomParser (List ( Coordinate, Coordinate ))
 quadraticBezierCurvetoArgumentSequence =
     Parser.inContext "quadratic bezier curveto argument sequence" <|
         delimited { item = quadraticBezierCurvetoArgument, delimiter = withDefault () commaWsp }
@@ -232,7 +236,7 @@ quadraticBezierCurvetoArgumentSequence =
 --Parser.repeat oneOrMore (quadraticBezierCurvetoArgument |. withDefault () commaWsp)
 
 
-quadraticBezierCurvetoArgument : Parser ( Coordinate, Coordinate )
+quadraticBezierCurvetoArgument : CustomParser ( Coordinate, Coordinate )
 quadraticBezierCurvetoArgument =
     succeed Tuple.pair
         |= coordinatePair
@@ -240,7 +244,7 @@ quadraticBezierCurvetoArgument =
         |= coordinatePair
 
 
-smoothQuadraticBezierCurveto : Parser DrawTo
+smoothQuadraticBezierCurveto : CustomParser DrawTo
 smoothQuadraticBezierCurveto =
     Parser.inContext "smooth quadratic bezier curveto" <|
         command
@@ -250,12 +254,12 @@ smoothQuadraticBezierCurveto =
             }
 
 
-smoothQuadraticBezierCurvetoArgumentSequence : Parser (List Coordinate)
+smoothQuadraticBezierCurvetoArgumentSequence : CustomParser (List Coordinate)
 smoothQuadraticBezierCurvetoArgumentSequence =
     delimited { item = coordinatePair, delimiter = withDefault () commaWsp }
 
 
-ellipticalArc : Parser DrawTo
+ellipticalArc : CustomParser DrawTo
 ellipticalArc =
     Parser.inContext "elliptical arc" <|
         command
@@ -265,12 +269,12 @@ ellipticalArc =
             }
 
 
-ellipticalArcArgumentSequence : Parser (List EllipticalArcArgument)
+ellipticalArcArgumentSequence : CustomParser (List EllipticalArcArgument)
 ellipticalArcArgumentSequence =
     delimited { item = ellipticalArcArgument, delimiter = withDefault () commaWsp }
 
 
-ellipticalArcArgument : Parser EllipticalArcArgument
+ellipticalArcArgument : CustomParser EllipticalArcArgument
 ellipticalArcArgument =
     let
         helper rx ry xAxisRotate arc sweep target =
@@ -304,7 +308,7 @@ ellipticalArcArgument =
 
 {-| Construct both the absolute and relative parser for a command.
 -}
-command : { constructor : Mode -> args -> command, character : Char, arguments : Parser args } -> Parser command
+command : { constructor : Mode -> args -> command, character : Char, arguments : CustomParser args } -> CustomParser command
 command { constructor, character, arguments } =
     oneOf
         [ succeed (constructor Absolute)

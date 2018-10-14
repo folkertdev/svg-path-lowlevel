@@ -1,15 +1,14 @@
-module Parser.Future exposing (ignore, inContext, keep, oneOrMore, repeat, zeroOrMore)
+module Parser.Future exposing (ignore, keep, oneOrMore, repeat, zeroOrMore)
 
 import Char exposing (Char)
-import Parser exposing ((|=), Parser, Step(..), loop, oneOf)
+import Parser.Advanced as Parser exposing ((|=), Parser, Step(..), loop, oneOf)
 
 
-inContext : context -> Parser a -> Parser a
-inContext _ parser =
-    parser
+type CountProblem
+    = CountProblem { expected : AtLeast, got : Int }
 
 
-repeat : AtLeast -> Parser a -> Parser (List a)
+repeat : AtLeast -> Parser context CountProblem a -> Parser context CountProblem (List a)
 repeat count parser =
     case count of
         ZeroOrMore ->
@@ -20,7 +19,7 @@ repeat count parser =
                 [ parser
                     |> Parser.andThen Parser.commit
                     |> Parser.andThen (\firstItem -> repeatHelper parser [ firstItem ])
-                , Parser.problem "repeat expected at least one, but got none"
+                , Parser.problem (CountProblem { expected = OneOrMore, got = 0 })
                 ]
 
 
@@ -36,13 +35,13 @@ type AtLeast
     | OneOrMore
 
 
-ignore : AtLeast -> (Char -> Bool) -> Parser ()
+ignore : AtLeast -> (Char -> Bool) -> Parser c CountProblem ()
 ignore amount predicate =
     keep amount predicate
         |> Parser.map (\_ -> ())
 
 
-keep : AtLeast -> (Char -> Bool) -> Parser String
+keep : AtLeast -> (Char -> Bool) -> Parser c CountProblem String
 keep amount predicate =
     case amount of
         ZeroOrMore ->
@@ -61,7 +60,7 @@ keep amount predicate =
                             Parser.succeed parsedString
 
                         else
-                            Parser.problem "expected at least one, but got none"
+                            Parser.problem (CountProblem { expected = OneOrMore, got = 0 })
                     )
 
 
@@ -73,12 +72,12 @@ oneOrMore =
     OneOrMore
 
 
-loopList : Parser a -> Parser (List a)
+loopList : Parser c p a -> Parser c p (List a)
 loopList elementParser =
     loop [] (listHelp elementParser)
 
 
-listHelp : Parser a -> List a -> Parser (Step (List a) (List a))
+listHelp : Parser c p a -> List a -> Parser c p (Step (List a) (List a))
 listHelp elementParser accum =
     oneOf
         [ Parser.succeed (\stmt -> Loop (stmt :: accum))
