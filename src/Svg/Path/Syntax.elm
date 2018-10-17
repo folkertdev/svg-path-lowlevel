@@ -1,6 +1,6 @@
-module Svg.Path.Syntax exposing (Problem(..), flag)
+module Svg.Path.Syntax exposing (ArcFlag, Context(..), DrawTo(..), EllipticalArcArgument, Mode(..), MoveTo(..), Problem(..), Sign(..), SweepFlag, applyConstructor, applySign, argumentSequence, argumentSequenceHelp, closepath, commaWsp, coordinate, coordinatePair, curveto, digitSequence, drawtoCommand, drawtoCommands, ellipticalArc, ellipticalArcArgument, exponent, flag, fractionalConstant, fractionalConstantWithExponent, horizontalLineto, instruction, integerConstant, isWhitespace, lineto, mode, moveto, movetoDrawtoCommandGroup, movetoDrawtoCommandGroups, number, optional, quadratic, sign, signedDigitSequence, smoothCurveto, smoothQuadratic, svgPath, threeCoordinatePairs, twoCoordinatePairs, verticalLineto, whitespaceSeparated, whitespaceSeparatedHelp)
 
-import Parser.Advanced as Parser exposing ((|.), (|=), Parser, Step(..), Token(..), chompIf, chompWhile, inContext, oneOf, symbol)
+import Parser.Advanced as Parser exposing ((|.), (|=), Parser, Step(..), Token(..), backtrackable, chompIf, chompWhile, inContext, oneOf, symbol)
 
 
 svgPath =
@@ -19,6 +19,15 @@ movetoDrawtoCommandGroup =
         |= moveto
         |. chompWhile isWhitespace
         |= oneOf [ drawtoCommands, Parser.succeed [] ]
+        |> Parser.map
+            (\( ( move, maybeImplicitLineTo ), drawtos ) ->
+                case maybeImplicitLineTo of
+                    Just implicitLineTo ->
+                        ( move, implicitLineTo :: drawtos )
+
+                    Nothing ->
+                        ( move, drawtos )
+            )
 
 
 drawtoCommands =
@@ -39,8 +48,7 @@ drawtoCommand =
         ]
 
 
-{-| MoveTo is always ab
--}
+{-| -}
 type MoveTo
     = MoveTo Mode ( Float, Float )
 
@@ -112,10 +120,12 @@ applyConstructor constructor ( argumentMode, argument ) =
 
 type Context
     = Instruction String
+    | Type String
 
 
 type Problem
     = NumberProblem String
+    | NeverOccurs
     | ExpectingFlag
     | ExpectingInstruction Char
     | ExpectingSign
@@ -159,9 +169,22 @@ optional parser =
 -- moveto
 
 
+moveto : Parser Context Problem ( MoveTo, Maybe DrawTo )
 moveto =
-    inContext (Instruction "MoveTo") <|
-        instruction 'm' coordinatePair
+    instruction 'm' coordinatePair
+        |> Parser.andThen
+            (\( parsedMode, pairs ) ->
+                case pairs of
+                    [] ->
+                        Parser.problem NeverOccurs
+
+                    [ x ] ->
+                        Parser.succeed ( MoveTo parsedMode x, Nothing )
+
+                    x :: xs ->
+                        Parser.succeed ( MoveTo parsedMode x, Just (LineTo parsedMode xs) )
+            )
+        |> inContext (Instruction "MoveTo")
 
 
 
@@ -312,7 +335,8 @@ argumentSequenceHelp : Parser c Problem argument -> List argument -> Parser c Pr
 argumentSequenceHelp argumentParser reverseArguments =
     oneOf
         [ Parser.succeed (\argument -> Loop (argument :: reverseArguments))
-            |. oneOf [ chompIf isWhitespace ExpectingWhitespace, Parser.succeed () ]
+            -- if we parse whitespace, but there is no argument, then we're done and should still succeed
+            |. oneOf [ backtrackable (chompIf isWhitespace ExpectingWhitespace), Parser.succeed () ]
             |= argumentParser
         , Parser.succeed (Done (List.reverse reverseArguments))
         ]
@@ -324,15 +348,14 @@ argumentSequenceHelp argumentParser reverseArguments =
 
 whitespaceSeparated : Parser c e argument -> Parser c e (List argument)
 whitespaceSeparated elementParser =
-    elementParser
-        |> Parser.andThen (\initial -> Parser.loop [ initial ] (whitespaceSeparatedHelp elementParser))
+    Parser.loop [] (whitespaceSeparatedHelp elementParser)
 
 
 whitespaceSeparatedHelp : Parser c e element -> List element -> Parser c e (Step (List element) (List element))
 whitespaceSeparatedHelp elementParser reverseElements =
     oneOf
         [ Parser.succeed (\argument -> Loop (argument :: reverseElements))
-            |. chompWhile isWhitespace
+            |. backtrackable (chompWhile isWhitespace)
             |= elementParser
         , Parser.succeed (Done (List.reverse reverseElements))
         ]
@@ -342,12 +365,13 @@ whitespaceSeparatedHelp elementParser reverseElements =
 -- coordinate pair
 
 
-coordinatePair : Parser c Problem ( Float, Float )
+coordinatePair : Parser Context Problem ( Float, Float )
 coordinatePair =
     Parser.succeed Tuple.pair
         |= coordinate
         |. optional commaWsp
         |= coordinate
+        |> Parser.inContext (Type "coordinatePair")
 
 
 
@@ -360,29 +384,22 @@ coordinate =
 
 
 
--- non-negative number
-
-
-nonNegativeNumber : Parser c Problem Float
-nonNegativeNumber =
-    oneOf
-        [ floatingPointConstant
-        , Parser.map toFloat integerConstant
-        ]
-
-
-
 -- number
 
 
 number : Parser c Problem Float
 number =
-    oneOf
-        [ Parser.succeed applySign
-            |= sign
-            |= nonNegativeNumber
-        , nonNegativeNumber
-        ]
+    Parser.succeed
+        (\parsedSign value ->
+            case parsedSign of
+                Positive ->
+                    value
+
+                Negative ->
+                    -value
+        )
+        |= oneOf [ backtrackable sign, Parser.succeed Positive ]
+        |= Parser.float (NumberProblem "ExpectedFloat") (NumberProblem "InvalidNumber")
 
 
 
@@ -406,21 +423,6 @@ flag =
 integerConstant : Parser c Problem Int
 integerConstant =
     digitSequence
-
-
-
--- floating point constant
-
-
-floatingPointConstant : Parser c Problem Float
-floatingPointConstant =
-    oneOf
-        [ fractionalConstant
-        , fractionalConstantWithExponent
-        , Parser.succeed (\base parsedExponent -> toFloat base * (10 ^ toFloat parsedExponent))
-            |= digitSequence
-            |= exponent
-        ]
 
 
 
@@ -461,7 +463,7 @@ fractionalConstant =
                 toFloat lhs
 
             else
-                toFloat lhs + floatRhs / toFloat shift
+                toFloat lhs + floatRhs / toFloat (10 ^ shift)
     in
     Parser.map asFloat parts
 
@@ -536,7 +538,8 @@ digitSequence =
                     Parser.succeed int
 
                 Nothing ->
-                    Parser.problem (NumberProblem "String.toInt returned Nothing")
+                    Parser.problem
+                        (NumberProblem <| "String.toInt returned Nothing for `" ++ digitString ++ "`")
     in
     (chompIf Char.isDigit ExpectingDigit |. chompWhile Char.isDigit)
         |> Parser.getChompedString
