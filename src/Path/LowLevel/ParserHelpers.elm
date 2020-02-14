@@ -1,4 +1,4 @@
-module Path.LowLevel.ParserHelpers exposing (Exponent(..), Sign(..), applyExponent, applySign, comma, commaWsp, coordinatePair, delimited, delimitedEndForbidden, digitSequence, exponent, flag, floatingPointConstant, fractionalConstant, ignore, integerConstant, isWhitespace, join, nonNegativeNumber, number, optional, resultToParser, sign, withDefault, wsp)
+module Path.LowLevel.ParserHelpers exposing (Exponent(..), Sign(..), applyExponent, applySign, comma, commaWsp, coordinatePair, delimited, delimitedEndForbidden, digitSequence, exponent, flag, floatingPointConstant, fractionalConstant, ignore, integerConstant, isWhitespace, join, leadingZeros, nonNegativeNumber, number, optional, resultToParser, sign, withDefault, wsp)
 
 {-| Helpers for parsing the primitives of SVG path syntax, based on [this W3C grammar](https://www.w3.org/TR/SVG/paths.html#PathDataBNF).
 -}
@@ -94,6 +94,12 @@ digitSequence =
         |> Parser.andThen (String.toInt >> maybeToParser)
 
 
+leadingZeros : Parser String
+leadingZeros =
+    Parser.keep oneOrMore (Char.toCode >> (==) 48)
+        |> Parser.andThen Parser.succeed
+
+
 
 -- |> inContext "digit sequence"
 
@@ -114,15 +120,19 @@ exponent =
 fractionalConstant : Parser Float
 fractionalConstant =
     let
-        helper left right =
-            String.toFloat (String.fromInt left ++ "." ++ String.fromInt right)
+        helper left zeros right =
+            String.toFloat (String.fromInt left ++ "." ++ zeros ++ String.fromInt right)
                 |> maybeToParser
     in
     withDefault 0 digitSequence
         |. symbol "."
         |> Parser.andThen
             (\leftOfDot ->
-                Parser.succeed (\rightOfDot -> helper leftOfDot rightOfDot)
+                Parser.succeed (\nzeros rightOfDot -> helper leftOfDot nzeros rightOfDot)
+                    |= oneOf
+                        [ leadingZeros
+                        , Parser.succeed ""
+                        ]
                     |= oneOf
                         [ digitSequence
                         , Parser.succeed 0
