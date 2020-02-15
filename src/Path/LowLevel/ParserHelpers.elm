@@ -97,7 +97,6 @@ digitSequence =
 leadingZeros : Parser String
 leadingZeros =
     Parser.keep oneOrMore (Char.toCode >> (==) 48)
-        |> Parser.andThen Parser.succeed
 
 
 
@@ -128,7 +127,7 @@ fractionalConstant =
         |. symbol "."
         |> Parser.andThen
             (\leftOfDot ->
-                Parser.succeed (\nzeros rightOfDot -> helper leftOfDot nzeros rightOfDot)
+                Parser.succeed (\zeros rightOfDot -> helper leftOfDot zeros rightOfDot)
                     |= oneOf
                         [ leadingZeros
                         , Parser.succeed ""

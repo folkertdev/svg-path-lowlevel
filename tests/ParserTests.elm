@@ -237,6 +237,7 @@ primitives =
         , parseTest digitSequence "42X" 42
         , parseTest digitSequence "42 " 42
         , parseTest leadingZeros "00 " "00"
+        , parseTest leadingZeros "01 " "0"
         , parseTest floatingPointConstant "42.0" 42
         , parseTest floatingPointConstant "42.0X" 42
         , parseTest floatingPointConstant "42.0 " 42
