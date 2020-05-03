@@ -236,12 +236,15 @@ primitives =
         , parseTest digitSequence "42" 42
         , parseTest digitSequence "42X" 42
         , parseTest digitSequence "42 " 42
+        , parseTest leadingZeros "00 " "00"
+        , parseTest leadingZeros "01 " "0"
         , parseTest floatingPointConstant "42.0" 42
         , parseTest floatingPointConstant "42.0X" 42
         , parseTest floatingPointConstant "42.0 " 42
         , parseTest floatingPointConstant "42e0" 42
         , parseTest floatingPointConstant "42e1" 420
         , parseTest floatingPointConstant "42e1X" 420
+        , parseTest floatingPointConstant "42.01 " 42.01
         , parseTest (delimited { item = floatingPointConstant, delimiter = commaWsp }) "" []
         , parseTest (delimited { item = floatingPointConstant, delimiter = commaWsp }) "45" [ 45 ]
         , parseTest (delimited { item = floatingPointConstant, delimiter = commaWsp }) "45 45" [ 45, 45 ]
