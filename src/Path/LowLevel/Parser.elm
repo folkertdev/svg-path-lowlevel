@@ -6,7 +6,7 @@ module Path.LowLevel.Parser exposing (parse)
 
 -}
 
-import Parser
+import Parser.Advanced
 import Path.LowLevel exposing (SubPath)
 import Path.LowLevel.ParserInternal exposing (svgMixedPath)
 
@@ -34,7 +34,7 @@ import Path.LowLevel.ParserInternal exposing (svgMixedPath)
         ]
 
 -}
-parse : String -> Result (List Parser.DeadEnd) (List SubPath)
+parse : String -> Result (List (Parser.Advanced.DeadEnd String String)) (List SubPath)
 parse input =
-    Parser.run svgMixedPath input
+    Parser.Advanced.run svgMixedPath input
         |> Result.map (List.map (\( moveto, drawtos ) -> SubPath moveto drawtos))

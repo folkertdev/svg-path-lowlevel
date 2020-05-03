@@ -2,12 +2,16 @@ module ParserTests exposing (commaWhitespaceParsing, commands, coordinatePairPar
 
 import Expect exposing (Expectation)
 import Fuzz exposing (Fuzzer, bool, int)
-import Parser exposing ((|.), (|=))
+import Parser.Advanced as Parser exposing ((|.), (|=))
 import Parser.Future as Parser
 import Path.LowLevel exposing (..)
 import Path.LowLevel.ParserHelpers exposing (..)
 import Path.LowLevel.ParserInternal exposing (..)
 import Test exposing (..)
+
+
+type alias Parser a =
+    Parser.Parser String String a
 
 
 suite : Test
@@ -116,18 +120,14 @@ coordinatePairParsingProblems =
             \_ ->
                 Parser.run coordinatePair "1,1,1,1"
                     |> Expect.equal (Ok ( 1, 1 ))
-        , test "coordinate pair and trailing commaWsp" <|
+        , test "coordinate pair and trailing optionalCommaWsp" <|
             \_ ->
-                Parser.run (coordinatePair |. commaWsp) "1,1,1,1"
+                Parser.run (coordinatePair |. optionalCommaWsp) "1,1,1,1"
                     |> Expect.equal (Ok ( 1, 1 ))
-        , test "coordinate pairs and separating commaWsp" <|
+        , test "coordinate pairs and separating optionalCommaWsp" <|
             \_ ->
-                Parser.run (Parser.succeed Tuple.pair |= coordinatePair |. commaWsp |= coordinatePair) "1,1,1,1"
+                Parser.run (Parser.succeed Tuple.pair |= coordinatePair |. optionalCommaWsp |= coordinatePair) "1,1,1,1"
                     |> Expect.equal (Ok ( ( 1, 1 ), ( 1, 1 ) ))
-        , test "coordinate pairs and separating commaWsp using repeat" <|
-            \_ ->
-                Parser.run (Parser.repeat Parser.oneOrMore (coordinatePair |. withDefault () commaWsp)) "1,1,1,1"
-                    |> Expect.equal (Ok [ ( 1, 1 ), ( 1, 1 ) ])
         , test "quadraticBezierCurvetoArgument" <|
             \_ ->
                 Parser.run quadraticBezierCurvetoArgument "1,1,1,1"
@@ -221,7 +221,7 @@ fuzzCoordinate =
 
 {-| Test a parser against its expected result
 -}
-parseTest : Parser.Parser a -> String -> a -> Test
+parseTest : Parser a -> String -> a -> Test
 parseTest parser string output =
     test ("parsing `" ++ string ++ "`") <|
         \_ ->
@@ -233,11 +233,9 @@ primitives : Test
 primitives =
     describe "primitive value parsers"
         [ parseTest nonNegativeNumber "25" 25
-        , parseTest digitSequence "42" 42
-        , parseTest digitSequence "42X" 42
-        , parseTest digitSequence "42 " 42
-        , parseTest leadingZeros "00 " "00"
-        , parseTest leadingZeros "01 " "0"
+        , parseTest integerConstant "42" 42
+        , parseTest integerConstant "42X" 42
+        , parseTest integerConstant "42 " 42
         , parseTest floatingPointConstant "42.0" 42
         , parseTest floatingPointConstant "42.0X" 42
         , parseTest floatingPointConstant "42.0 " 42
@@ -245,9 +243,9 @@ primitives =
         , parseTest floatingPointConstant "42e1" 420
         , parseTest floatingPointConstant "42e1X" 420
         , parseTest floatingPointConstant "42.01 " 42.01
-        , parseTest (delimited { item = floatingPointConstant, delimiter = commaWsp }) "" []
-        , parseTest (delimited { item = floatingPointConstant, delimiter = commaWsp }) "45" [ 45 ]
-        , parseTest (delimited { item = floatingPointConstant, delimiter = commaWsp }) "45 45" [ 45, 45 ]
+        , parseTest (delimited { item = floatingPointConstant, delimiter = optionalCommaWsp }) "" []
+        , parseTest (delimited { item = floatingPointConstant, delimiter = optionalCommaWsp }) "45" [ 45 ]
+        , parseTest (delimited { item = floatingPointConstant, delimiter = optionalCommaWsp }) "45 45" [ 45, 45 ]
         ]
 
 

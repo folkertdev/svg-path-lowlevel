@@ -1,4 +1,4 @@
-module Parser.Future exposing (ignore, inContext, keep, oneOrMore, repeat, zeroOrMore)
+module Parser.Future exposing (ignore, inContext, keep, oneOrMore, zeroOrMore)
 
 import Char exposing (Char)
 import Parser exposing ((|=), Parser, Step(..), loop, oneOf)
@@ -7,28 +7,6 @@ import Parser exposing ((|=), Parser, Step(..), loop, oneOf)
 inContext : context -> Parser a -> Parser a
 inContext _ parser =
     parser
-
-
-repeat : AtLeast -> Parser a -> Parser (List a)
-repeat count parser =
-    case count of
-        ZeroOrMore ->
-            repeatHelper parser []
-
-        OneOrMore ->
-            oneOf
-                [ parser
-                    |> Parser.andThen Parser.commit
-                    |> Parser.andThen (\firstItem -> repeatHelper parser [ firstItem ])
-                , Parser.problem "repeat expected at least one, but got none"
-                ]
-
-
-repeatHelper parser accum =
-    oneOf
-        [ Parser.backtrackable (parser |> Parser.andThen (\nextItem -> repeatHelper parser (nextItem :: accum)))
-        , Parser.succeed (List.reverse accum)
-        ]
 
 
 type AtLeast
