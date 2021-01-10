@@ -236,16 +236,24 @@ primitives =
         , parseTest integerConstant "42" 42
         , parseTest integerConstant "42X" 42
         , parseTest integerConstant "42 " 42
-        , parseTest floatingPointConstant "42.0" 42
-        , parseTest floatingPointConstant "42.0X" 42
-        , parseTest floatingPointConstant "42.0 " 42
-        , parseTest floatingPointConstant "42e0" 42
-        , parseTest floatingPointConstant "42e1" 420
-        , parseTest floatingPointConstant "42e1X" 420
-        , parseTest floatingPointConstant "42.01 " 42.01
-        , parseTest (delimited { item = floatingPointConstant, delimiter = optionalCommaWsp }) "" []
-        , parseTest (delimited { item = floatingPointConstant, delimiter = optionalCommaWsp }) "45" [ 45 ]
-        , parseTest (delimited { item = floatingPointConstant, delimiter = optionalCommaWsp }) "45 45" [ 45, 45 ]
+        , parseTest number "42.0" 42
+        , parseTest number "42.0X" 42
+        , parseTest number "42.0 " 42
+        , parseTest number "42e0" 42
+        , parseTest number "42e1" 420
+        , parseTest number "42e1X" 420
+        , parseTest number "42.01 " 42.01
+        , parseTest number "5" 5
+        , parseTest number "-5" -5
+        , parseTest number "-5.0" -5
+        , parseTest number "+.01 " 0.01
+        , parseTest number "-.01 " -0.01
+        , parseTest (delimited { item = number, delimiter = optionalCommaWsp }) "" []
+        , parseTest (delimited { item = number, delimiter = optionalCommaWsp }) "45" [ 45 ]
+        , parseTest (delimited { item = number, delimiter = optionalCommaWsp }) "45 45" [ 45, 45 ]
+
+        -- NOTE this does not work; should it?
+        -- , parseTest number ".01 " 0.01
         ]
 
 

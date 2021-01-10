@@ -1,4 +1,4 @@
-module Path.LowLevel.ParserHelpers exposing (Sign(..), applySign, comma, coordinatePair, delimited, delimitedEndForbidden, flag, floatingPointConstant, fractionalConstant, integerConstant, isWhitespace, nonNegativeNumber, number, optional, optionalCommaWsp, resultToParser, sign, withDefault, wsp)
+module Path.LowLevel.ParserHelpers exposing (Sign(..), applySign, comma, coordinatePair, delimited, delimitedEndForbidden, flag, fractionalConstant, integerConstant, isWhitespace, nonNegativeNumber, number, optional, optionalCommaWsp, resultToParser, sign, withDefault, wsp)
 
 {-| Helpers for parsing the primitives of SVG path syntax, based on [this W3C grammar](https://www.w3.org/TR/SVG/paths.html#PathDataBNF).
 -}
@@ -192,9 +192,36 @@ applySign currentSign num =
 
 number : Parser Float
 number =
-    Parser.succeed applySign
-        |= sign
-        |= floatingPointConstant
+    let
+        zeroOrMoreDigits =
+            chompWhile Char.isDigit
+
+        oneOrMoreDigits =
+            chompIf Char.isDigit "digit"
+                |. chompWhile Char.isDigit
+
+        parser =
+            oneOf
+                [ Parser.chompIf (\c -> c == '+' || c == '-') ""
+                    |. zeroOrMoreDigits
+                    |. oneOf
+                        [ symbol "."
+                            |. zeroOrMoreDigits
+                        , Parser.succeed ()
+                        ]
+                    |. oneOf [ exponent, Parser.succeed () ]
+                , oneOrMoreDigits
+                    |. Parser.oneOf
+                        [ symbol "."
+                            |. zeroOrMoreDigits
+                        , Parser.succeed ()
+                        ]
+                    |. oneOf [ exponent, Parser.succeed () ]
+                ]
+    in
+    parser
+        |> Parser.getChompedString
+        |> Parser.andThen parseFloat
 
 
 nonNegativeNumber : Parser Float
